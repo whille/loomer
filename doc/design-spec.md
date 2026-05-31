@@ -132,24 +132,64 @@
 **设计约束**（顺序是不变量）:
 
 ```
-1. assess_risk() — 必须 merge 前！
-2. 持久化风险结果
-3. merge agent 分支到主分支
-   - merge 前自动 commit（agent 可能不 commit）
-   - merge 冲突 → CONFLICTED（保留 worktree）
-4. 停止 agent 进程
-5. 分级决策:
-   - merge_strategy="auto" + LOW → ACCEPTED + 清理 worktree
-   - merge_strategy="auto" + HIGH → REVIEW + 创建 PR + 保留 worktree
-   - merge_strategy="always" → REVIEW + 创建 PR
-   - merge_strategy="never" → ACCEPTED
-6. 触发 DAG 依赖解析
+StatusDetector 检测到 agent 退出(exit_code=0)
+  → transition callback 自动触发 done(name)
+    │
+    ├── 1. assess_risk() — 必须 merge 前！
+    ├── 2. 持久化风险结果
+    ├── 3. merge agent 分支到主分支
+    │     - merge 前自动 commit（agent 可能不 commit）
+    │     - merge 冲突 → 尝试自动解决（见 §6.1）
+    │     - 自动解决成功 → 继续流程
+    │     - 自动解决失败 → CONFLICTED（保留 worktree，等人处理）
+    ├── 4. 停止 agent 进程
+    ├── 5. 分级决策:
+    │     - merge_strategy="auto" + LOW → ACCEPTED + 清理 worktree（无人干预）
+    │     - merge_strategy="auto" + HIGH → REVIEW + 创建 PR + 保留 worktree
+    │     - merge_strategy="always" → REVIEW + 创建 PR
+    │     - merge_strategy="never" → ACCEPTED
+    └── 6. 触发 DAG 依赖解析（立即解锁下游任务）
 ```
+
+**不变量**: done() 由 transition callback 自动触发，不需要人工干预。人只在 REVIEW（HIGH 风险）和 CONFLICTED（自动解决失败的 merge 冲突）时介入。
+
+### §6.1 Merge 冲突自动解决
+
+**设计约束**:
+
+merge 冲突时，先尝试自动解决，失败才抛给人。自动解决策略按文件类型分：
+
+| 文件类型 | 冲突模式 | 自动解决策略 |
+|---------|---------|-------------|
+| `package.json` | add/add（各自加依赖） | 合并两边的 dependencies/devDependencies，取并集 |
+| `src/*.ts` 源码 | add/add（各自加类/函数） | 识别 import 区 + export 区 + 类定义，按顺序拼接（ours 前 theirs 后） |
+| `*config*` 配置文件 | add/add | 深合并（deep merge），ours 为基准叠 theirs 新增 key |
+| 其他 | 任何 | 不自动解决，CONFLICTED 留人 |
+
+**自动解决流程**（不变量）:
+
+```
+git merge → 冲突
+  → 按文件类型分派自动解决策略
+  → 逐文件尝试解决
+  → 解决后 git add + 验证（tsc --noEmit / biome check / vitest run）
+  → 验证通过 → 自动 commit → 继续流程
+  → 验证失败或无法解决 → git merge --abort → CONFLICTED
+```
+
+**安全边界**（不变量）:
+
+1. 自动解决后必须验证（至少 `tsc --noEmit`），验证失败则回退
+2. 无法识别冲突结构的文件不自动解决
+3. 自动解决日志写入状态存储，供人审计
+4. 并发 merge 时串行化（同一时刻只有一个 agent 在 merge）
+
+**实现自由**: 具体的 AST 解析方式（ts-morph / 正则 / 行分析）、验证命令组合、回退策略。
 
 **accept/reject 约束**:
 - accept: REVIEW→ACCEPTED + 清理 worktree
 - reject: REVIEW→REJECTED + 清理 worktree
-- ⚠️ 已知缺陷: reject 未回滚已合并的改动
+- 已知缺陷: reject 未回滚已合并的改动
 
 **worktree 清理规则**（不变量）:
 - ACCEPTED → 清理
@@ -248,6 +288,8 @@
 | 8 | 旧计划残留阻塞新计划 | `runPlan()` 启动前必须清理旧数据 |
 | 9 | CWD 变化导致 git 命令错目录 | 所有 git 命令必须显式指定 cwd=绝对路径 |
 | 10 | 旧数据缺字段 crash | 状态读取必须防御性处理缺失字段 |
+| 11 | 仪表盘不展示风险信息导致盲操作 | REVIEW 状态必须展示 risk_assessment（6 信号详情），让人知道为什么进 REVIEW |
+| 12 | 并行 agent 修改共享文件导致 merge 冲突 | 冲突先自动解决（§6.1），失败才抛人；串行化并发 merge |
 
 → 详见 [technical-decisions.md §8](technical-decisions.md)
 
