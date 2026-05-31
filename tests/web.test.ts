@@ -43,6 +43,40 @@ describe("createApp", () => {
       expect(res.status).toBe(200);
       expect(res.headers["content-type"]).toMatch(/text\/html/);
     });
+
+    it("contains agent table container", async () => {
+      const res = await request(app).get("/");
+      expect(res.text).toContain('id="agent-table"');
+      expect(res.text).toContain('id="agent-tbody"');
+    });
+
+    it("contains SSE indicator", async () => {
+      const res = await request(app).get("/");
+      expect(res.text).toContain('id="sse-dot"');
+    });
+
+    it("contains start agent form", async () => {
+      const res = await request(app).get("/");
+      expect(res.text).toContain('id="start-form"');
+      expect(res.text).toContain('id="input-name"');
+      expect(res.text).toContain('id="input-prompt"');
+    });
+
+    it("contains log and diff modals", async () => {
+      const res = await request(app).get("/");
+      expect(res.text).toContain('id="log-modal"');
+      expect(res.text).toContain('id="diff-modal"');
+    });
+
+    it("contains DAG panel", async () => {
+      const res = await request(app).get("/");
+      expect(res.text).toContain('id="dag-panel"');
+    });
+
+    it("loads app.js", async () => {
+      const res = await request(app).get("/");
+      expect(res.text).toContain('src="/app.js"');
+    });
   });
 
   describe("GET /api/status", () => {
@@ -529,6 +563,20 @@ describe("createApp", () => {
       } finally {
         server.close();
       }
+    });
+  });
+
+  describe("static assets", () => {
+    it("serves style.css", async () => {
+      const res = await request(app).get("/style.css");
+      expect(res.status).toBe(200);
+      expect(res.headers["content-type"]).toMatch(/css/);
+    });
+
+    it("serves app.js", async () => {
+      const res = await request(app).get("/app.js");
+      expect(res.status).toBe(200);
+      expect(res.headers["content-type"]).toMatch(/javascript/);
     });
   });
 
