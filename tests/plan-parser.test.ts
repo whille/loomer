@@ -353,6 +353,7 @@ describe("PlanParser.fromPrdJson", () => {
         id: "US-001",
         title: "Story title",
         description: "As a developer, I want this feature",
+        acceptanceCriteria: ["Typecheck passes", "Works correctly"],
       },
       {
         id: "US-002",
@@ -387,16 +388,14 @@ describe("PlanParser.fromPrdJson", () => {
     const spec = PlanParser.fromPrdJson(filePath);
     expect(spec.name).toBe("test-feature");
     expect(spec.tasks).toHaveLength(2);
-    expect(spec.tasks[0]).toEqual({
-      id: "LMR-001",
-      prompt: "As a developer, I want this feature",
-      dependsOn: [],
-    });
-    expect(spec.tasks[1]).toEqual({
-      id: "LMR-002",
-      prompt: "As a user, I want that",
-      dependsOn: ["LMR-001"],
-    });
+    expect(spec.tasks[0].id).toBe("LMR-001");
+    expect(spec.tasks[0].prompt).toContain("As a developer, I want this feature");
+    expect(spec.tasks[0].prompt).toContain("Acceptance Criteria:");
+    expect(spec.tasks[0].prompt).toContain("Typecheck passes");
+    expect(spec.tasks[0].dependsOn).toEqual([]);
+    expect(spec.tasks[1].id).toBe("LMR-002");
+    expect(spec.tasks[1].prompt).toContain("As a user, I want that");
+    expect(spec.tasks[1].dependsOn).toEqual(["LMR-001"]);
   });
 
   it("userStory description 为空时回退到 title", () => {
@@ -411,10 +410,10 @@ describe("PlanParser.fromPrdJson", () => {
     };
     const filePath = writeTmpPrd(prd);
     const spec = PlanParser.fromPrdJson(filePath);
-    expect(spec.tasks[0].prompt).toBe("Task Title");
+    expect(spec.tasks[0].prompt).toContain("Story Title");
   });
 
-  it("userStory 引用不存在时回退到 title", () => {
+  it("userStory 引用不存在时回退到 task id", () => {
     const prd = {
       project: "missing-ref",
       userStories: [],
@@ -424,7 +423,7 @@ describe("PlanParser.fromPrdJson", () => {
     };
     const filePath = writeTmpPrd(prd);
     const spec = PlanParser.fromPrdJson(filePath);
-    expect(spec.tasks[0].prompt).toBe("Fallback Title");
+    expect(spec.tasks[0].prompt).toContain("Task T-001");
   });
 
   it("自定义 maxConcurrent", () => {

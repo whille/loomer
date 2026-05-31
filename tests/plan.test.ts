@@ -122,33 +122,33 @@ describe("DAGValidator", () => {
       ]))).not.toThrow();
     });
 
-    it("非法字符抛 DAGValidationError", () => {
+    it("非法字符抛 PlanFormatError", () => {
       expect(() => DAGValidator.validate(makeSpec([
         { id: "bad id!", dependsOn: [] },
-      ]))).toThrow(DAGValidationError);
+      ]))).toThrow(PlanFormatError);
     });
 
-    it("超长 ID 抛 DAGValidationError", () => {
+    it("超长 ID 抛 PlanFormatError", () => {
       expect(() => DAGValidator.validate(makeSpec([
         { id: "a".repeat(65), dependsOn: [] },
-      ]))).toThrow(DAGValidationError);
+      ]))).toThrow(PlanFormatError);
     });
   });
 
   describe("规则 2: 无重复 ID", () => {
-    it("重复 ID 抛 DAGValidationError", () => {
+    it("重复 ID 抛 PlanFormatError", () => {
       expect(() => DAGValidator.validate(makeSpec([
         { id: "T-001", dependsOn: [] },
         { id: "T-001", dependsOn: [] },
-      ]))).toThrow(DAGValidationError);
+      ]))).toThrow(PlanFormatError);
     });
   });
 
   describe("规则 3: 无缺失引用", () => {
-    it("引用不存在的 ID 抛 DAGValidationError", () => {
+    it("引用不存在的 ID 抛 PlanFormatError", () => {
       expect(() => DAGValidator.validate(makeSpec([
         { id: "T-001", dependsOn: ["T-999"] },
-      ]))).toThrow(DAGValidationError);
+      ]))).toThrow(PlanFormatError);
     });
   });
 
