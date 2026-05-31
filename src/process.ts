@@ -24,6 +24,23 @@ interface TrackedChild {
   outputLines: string[];
 }
 
+const activeManagers = new Set<ProcessManager>();
+let signalHandlersRegistered = false;
+
+function registerSignalHandlers(): void {
+  if (signalHandlersRegistered) return;
+  signalHandlersRegistered = true;
+
+  for (const sig of ["SIGTERM", "SIGHUP", "SIGINT"] as const) {
+    process.on(sig, () => {
+      for (const mgr of activeManagers) {
+        mgr.killAllProcessGroups(sig);
+      }
+      process.exit(128 + (sig === "SIGTERM" ? 15 : sig === "SIGINT" ? 2 : 1));
+    });
+  }
+}
+
 export class ProcessManager {
   private readonly config: LoomerConfig;
   private readonly state: StateStore;
@@ -32,6 +49,26 @@ export class ProcessManager {
   constructor(config: LoomerConfig, state: StateStore) {
     this.config = config;
     this.state = state;
+    activeManagers.add(this);
+    registerSignalHandlers();
+  }
+
+  // 信号处理器调用：杀所有被跟踪的进程组
+  killAllProcessGroups(sig: string): void {
+    for (const [, tracked] of this.processes) {
+      if (!tracked.exited && tracked.child.pid) {
+        try {
+          process.kill(-tracked.child.pid, sig as NodeJS.Signals);
+        } catch (err) {
+          const code = (err as NodeJS.ErrnoException).code;
+          if (code !== "ESRCH") {
+            console.warn(
+              `[ProcessManager] signal handler kill(-${tracked.child.pid}) failed: ${code ?? err}`,
+            );
+          }
+        }
+      }
+    }
   }
 
   start(name: string, worktreePath: string, prompt: string): void {
@@ -61,7 +98,9 @@ export class ProcessManager {
       cwd: worktreePath,
       stdio: ["pipe", "pipe", "pipe"],
       env,
+      detached: true,
     });
+    child.unref();
 
     // stdin pipe 传 prompt
     child.stdin.write(prompt);
@@ -99,12 +138,32 @@ export class ProcessManager {
   stop(name: string): void {
     const tracked = this.processes.get(name);
     if (tracked && !tracked.exited) {
-      tracked.child.kill("SIGTERM");
+      const pid = tracked.child.pid;
+      // 杀整个进程组（负 PID），避免孙子进程变孤儿
+      try {
+        if (pid) process.kill(-pid, "SIGTERM");
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === "ESRCH") {
+          // 进程组已退出，降级杀主进程
+          tracked.child.kill("SIGTERM");
+        } else {
+          // EPERM 或意外错误，记录日志仍尝试降级
+          console.warn(
+            `[ProcessManager] process.kill(-${pid}) failed: ${code ?? err}`,
+          );
+          tracked.child.kill("SIGTERM");
+        }
+      }
     }
   }
 
   list(): string[] {
     return [...this.processes.keys()];
+  }
+
+  dispose(): void {
+    activeManagers.delete(this);
   }
 
   isAlive(name: string): boolean {

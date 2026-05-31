@@ -16,7 +16,7 @@
     "check": "tsc --noEmit && biome check src/"
   },
   "dependencies": {
-    "better-sqlite3": "^11.10.0",
+    "better-sqlite3": "^12.10.0",
     "commander": "^12.1.0",
     "ejs": "^3.1.10",
     "express": "^4.21.0",

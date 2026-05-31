@@ -299,12 +299,8 @@ export class LoomerApp {
       created_at: Date.now() / 1000,
     });
 
-    // 启动 root 任务（dependsOn=[]）
-    for (const task of spec.tasks) {
-      if (task.dependsOn.length === 0) {
-        this.start(task.id, task.prompt);
-      }
-    }
+    // 启动 root 任务（通过 PlanExecutor 统一处理 maxConcurrent）
+    this.planExecutor.launchReady();
 
     // 启动 StatusDetector 轮询
     this.startStatusPolling();
@@ -420,6 +416,7 @@ export class LoomerApp {
     for (const name of this.processManager.list()) {
       this.processManager.stop(name);
     }
+    this.processManager.dispose();
   }
 
   // === 私有方法 ===

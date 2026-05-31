@@ -40,6 +40,7 @@ function makeFakeChild() {
     stderr: { on: vi.fn() },
     kill: vi.fn(),
     killed: false,
+    unref: vi.fn(),
   };
 }
 
