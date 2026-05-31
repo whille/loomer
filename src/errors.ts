@@ -1,72 +1,31 @@
 export class LoomerError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "LoomerError";
+    this.name = this.constructor.name;
   }
 }
 
-export class DirtyWorktreeError extends LoomerError {
-  constructor(message: string) {
-    super(message);
-    this.name = "DirtyWorktreeError";
-  }
-}
+export class DirtyWorktreeError extends LoomerError {}
 
-export class BranchConflictError extends LoomerError {
-  constructor(message: string) {
-    super(message);
-    this.name = "BranchConflictError";
-  }
-}
+export class BranchConflictError extends LoomerError {}
 
-export class InvalidNameError extends LoomerError {
-  constructor(message: string) {
-    super(message);
-    this.name = "InvalidNameError";
-  }
-}
+export class InvalidNameError extends LoomerError {}
 
-export class AgentNotFoundError extends LoomerError {
-  constructor(message: string) {
-    super(message);
-    this.name = "AgentNotFoundError";
-  }
-}
+export class AgentNotFoundError extends LoomerError {}
 
 export class MergeError extends LoomerError {
   conflictFiles?: string[];
 
   constructor(message: string, conflictFiles?: string[]) {
     super(message);
-    this.name = "MergeError";
     this.conflictFiles = conflictFiles;
   }
 }
 
-export class PlanFormatError extends LoomerError {
-  constructor(message: string) {
-    super(message);
-    this.name = "PlanFormatError";
-  }
-}
+export class PlanFormatError extends LoomerError {}
 
-export class DAGValidationError extends LoomerError {
-  constructor(message: string) {
-    super(message);
-    this.name = "DAGValidationError";
-  }
-}
+export class DAGValidationError extends LoomerError {}
 
-export class PlanNotFoundError extends LoomerError {
-  constructor(message: string) {
-    super(message);
-    this.name = "PlanNotFoundError";
-  }
-}
+export class PlanNotFoundError extends LoomerError {}
 
-export class PlanAlreadyActiveError extends LoomerError {
-  constructor(message: string) {
-    super(message);
-    this.name = "PlanAlreadyActiveError";
-  }
-}
+export class PlanAlreadyActiveError extends LoomerError {}
