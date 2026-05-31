@@ -1,0 +1,321 @@
+{
+  "project": "loomer-v01",
+  "branchName": "loomer-v01",
+  "description": "Node.js AI agent 编排器，从 conductor-ui Python 转换：PRD 驱动 DAG 并行调度 + 风险分级审查 + 自动 merge/PR。技术栈对齐 Claude Code：TypeScript + ESM + Bun + Biome。",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "项目骨架 + Config + Errors",
+      "description": "作为开发者，我需要 Node.js 项目结构和基础模块（Config + Errors），所有其他模块依赖它们",
+      "acceptanceCriteria": [
+        "package.json 含 type:module, engines:node>=18, packageManager:bun@1.1.0",
+        "dependencies: express/better-sqlite3/ejs/commander/js-yaml + devDeps: typescript/vitest/supertest/@types/*/biome",
+        "tsconfig.json: strict, esModuleInterop, moduleResolution=bundler, target=ES2022",
+        "biome.json: formatter + linter 配置",
+        "src/config.ts 实现 LoomerConfig 类含 Config.load() 三层覆盖",
+        "src/errors.ts 实现 LoomerError 异常层次（9 个子类）",
+        "bun test 运行 tests/ 全部通过"
+      ],
+      "depends": [],
+      "priority": 1,
+      "passes": false,
+      "notes": "详见 doc/api-spec.md 第 1-2 节"
+    },
+    {
+      "id": "US-002",
+      "title": "StateStore SQLite WAL",
+      "description": "作为开发者，我需要 SQLite WAL 模式的状态存储，替代 Python 的 JSON + fcntl.flock",
+      "acceptanceCriteria": [
+        "src/state.ts 实现 StateStore 类（better-sqlite3 WAL + busy_timeout=5000）",
+        "agents 表 + plans 表 schema 正确",
+        "核心方法：load/save/updateAgent/updateAgentStatus/removeAgent/getAgent/getPlan/setPlan/clearPlan/getPendingAgents/getRunningCount",
+        "getAgent() 对缺失字段防御性处理（返回默认值而非 throw，Dogfooding 教训：旧数据可能缺字段）",
+        "Archive 方法：archiveAgent/getActiveAgents/getArchived",
+        "tests/state.test.ts 全部通过"
+      ],
+      "depends": ["US-001"],
+      "priority": 2,
+      "passes": false,
+      "notes": "详见 doc/technical-decisions.md 第 1 节"
+    },
+    {
+      "id": "US-003",
+      "title": "WorkspaceManager Git Worktree CRUD",
+      "description": "作为开发者，我需要工作区管理器来创建/删除 git worktree",
+      "acceptanceCriteria": [
+        "src/workspace.ts 实现 WorkspaceManager 类",
+        "create/remove/listAll/exists 方法正确",
+        "tests/workspace.test.ts 全部通过"
+      ],
+      "depends": ["US-001"],
+      "priority": 2,
+      "passes": false,
+      "notes": "详见 doc/api-spec.md 第 7 节"
+    },
+    {
+      "id": "US-004",
+      "title": "SafetyChecks 风险分级审查",
+      "description": "作为开发者，我需要安全检查和风险评估模块，实现 6 个风险信号和 3 种 merge 策略",
+      "acceptanceCriteria": [
+        "src/safety.ts 实现 SafetyChecks 类含 assessRisk()",
+        "6 个风险信号判定正确（file_count/line_count/new_files/public_modules/conflict/test）",
+        "merge_strategy always→HIGH, never→LOW",
+        "diff 范围 <baseBranch>...HEAD",
+        "tests/safety.test.ts 全部通过"
+      ],
+      "depends": ["US-001"],
+      "priority": 2,
+      "passes": false,
+      "notes": "详见 doc/risk-assessment.md"
+    },
+    {
+      "id": "US-005",
+      "title": "PlanParser + DAGValidator",
+      "description": "作为开发者，我需要计划解析和 DAG 验证模块，支持 plan.md 和 prd.json 两种输入",
+      "acceptanceCriteria": [
+        "src/plan.ts 实现 PlanParser.parse() + fromPrdJson()",
+        "DAGValidator.validate() 4 规则：ID 合法/无重复/无缺引用/无环(Kahn)",
+        "tests/plan-parser.test.ts 全部通过"
+      ],
+      "depends": ["US-001"],
+      "priority": 2,
+      "passes": false,
+      "notes": "详见 doc/dag-scheduling.md"
+    },
+    {
+      "id": "US-006",
+      "title": "ProcessManager spawn + stream-json",
+      "description": "作为开发者，我需要进程管理器，用 child_process.spawn 替代 Python Popen，实时 pipe stream-json",
+      "acceptanceCriteria": [
+        "src/process.ts 实现 ProcessManager 类",
+        "spawn 启动参数必须含 --output-format stream-json --verbose --include-partial-messages（硬编码不可省略）",
+        "stdin pipe 传递 prompt，on('exit') 回调写 exit_code",
+        "_parseStreamJson() 解析 content_block_delta + result 事件",
+        "tests/process.test.ts 全部通过"
+      ],
+      "depends": ["US-001"],
+      "priority": 2,
+      "passes": false,
+      "notes": "Dogfooding 教训：缺少 --verbose 导致 CRASHED，详见 doc/technical-decisions.md 8.1"
+    },
+    {
+      "id": "US-007",
+      "title": "StatusDetector 9 种状态 + 转换",
+      "description": "作为开发者，我需要状态检测器，实现 9 种状态判断和 transition callback",
+      "acceptanceCriteria": [
+        "src/status.ts 实现 StatusDetector 类",
+        "getStatus() 检测优先级：终态→STALE(超时)→isAlive→isPidAlive→exit_code→poll→fallback→CRASHED",
+        "exit_code !== 0 必须 short-circuit 到 CRASHED（Dogfooding 教训 8.6）",
+        "setTransitionCallback + _fireTransition 正确触发",
+        "tests/status.test.ts 全部通过"
+      ],
+      "depends": ["US-002", "US-006"],
+      "priority": 3,
+      "passes": false,
+      "notes": "详见 doc/state-machine.md"
+    },
+    {
+      "id": "US-008",
+      "title": "LoomerApp 核心编排",
+      "description": "作为开发者，我需要应用核心，编排所有模块实现 agent 生命周期和风险分级 merge",
+      "acceptanceCriteria": [
+        "src/app.ts 实现 LoomerApp 类",
+        "start/done/accept/reject/kill/retry/status/log 方法正确",
+        "done() 流程：assessRisk(merge前) + _mergeAgent + 分级决策",
+        "_mergeAgent 必须：git add -A + 检查是否有变更 + 自动 commit（agent 可能不 commit，Dogfooding 教训）",
+        "worktree 清理：done(LOW)/accept/reject 后 workspace.remove，CONFLICTED/REVIEW 保留",
+        "_createPr() 失败不阻塞",
+        "_countPlanProgress() 覆盖所有状态含 stale/review/rejected",
+        "runPlan() 启动前清除旧计划残留数据（state.clearPlan + 清理旧 agent）",
+        "构造函数记录 repoPath=CWD，所有 git 命令用 worktree 绝对路径（避免 CWD 问题）",
+        "tests/app.test.ts 全部通过"
+      ],
+      "depends": ["US-002", "US-003", "US-004", "US-006", "US-007"],
+      "priority": 4,
+      "passes": false,
+      "notes": "详见 doc/risk-assessment.md done()流程"
+    },
+    {
+      "id": "US-009",
+      "title": "PlanExecutor DAG 并行调度",
+      "description": "作为开发者，我需要计划执行器，实现 DAG 依赖解析和并行任务启动",
+      "acceptanceCriteria": [
+        "PlanExecutor.registerTasks/onTaskDone/isPlanComplete/getProgress 正确",
+        "onTaskDone 级联拒绝：dep REJECTED → 子任务 REJECTED",
+        "LoomerApp.runPlan() + planStatus() + planDag() 正确",
+        "planStatus() 有 _countPlanProgress() 兜底（Dogfooding 教训 8.4）",
+        "tests/plan-executor.test.ts 全部通过"
+      ],
+      "depends": ["US-005", "US-008"],
+      "priority": 5,
+      "passes": false,
+      "notes": "详见 doc/dag-scheduling.md"
+    },
+    {
+      "id": "US-010",
+      "title": "CLI Commander.js 子命令",
+      "description": "作为用户，我需要命令行入口操作 loomer 的所有功能",
+      "acceptanceCriteria": [
+        "src/cli.ts 实现 Commander.js CLI",
+        "子命令：start/done/kill/retry/accept/reject/log/status(--all)/serve/plan run/plan status",
+        "tests/cli.test.ts 全部通过"
+      ],
+      "depends": ["US-008"],
+      "priority": 5,
+      "passes": false,
+      "notes": "详见 doc/api-spec.md 第 10 节"
+    },
+    {
+      "id": "US-011",
+      "title": "Web API Express + SSE",
+      "description": "作为开发者，我需要 Express Web 层提供 REST API 和 SSE 实时推送",
+      "acceptanceCriteria": [
+        "src/web.ts 实现 createApp() 工厂函数",
+        "REST 端点完整：status/start/log/diff/done/kill/retry/accept/reject/plan run/plan status/plan dag",
+        "SSE：2s 轮询只推变化 + 15s 心跳",
+        "status 端点支持 ?archived 参数",
+        "tests/web.test.ts 全部通过"
+      ],
+      "depends": ["US-008"],
+      "priority": 5,
+      "passes": false,
+      "notes": "详见 doc/web-and-sse.md"
+    },
+    {
+      "id": "US-012",
+      "title": "Dashboard HTML 仪表盘",
+      "description": "作为用户，我需要浏览器仪表盘查看和操作 agent",
+      "acceptanceCriteria": [
+        "views/index.ejs 单页面仪表盘",
+        "Agent 列表 + 状态徽章 + 操作按钮 + 日志 + Diff + DAG 可视化",
+        "SSE 客户端实时更新",
+        "public/style.css 响应式布局",
+        "Verify in browser"
+      ],
+      "depends": ["US-011"],
+      "priority": 6,
+      "passes": false,
+      "notes": "详见 doc/web-and-sse.md"
+    },
+    {
+      "id": "US-013",
+      "title": "Daemon 系统服务管理",
+      "description": "作为开发者，我需要 daemon 模块支持 macOS launchd 和 Linux systemd",
+      "acceptanceCriteria": [
+        "src/daemon/ 实现 manager/launchd/systemd/metadata",
+        "CLI daemon install/uninstall/start/stop/status 子命令",
+        "tests/daemon.test.ts 全部通过"
+      ],
+      "depends": ["US-001"],
+      "priority": 2,
+      "passes": false,
+      "notes": "详见 doc/api-spec.md 第 12 节"
+    }
+  ],
+  "taskSplit": [
+    {
+      "id": "LMR-001",
+      "title": "项目骨架 + Config + Errors",
+      "userStory": "US-001",
+      "depends": [],
+      "parallel": true,
+      "branch": "feat/skeleton"
+    },
+    {
+      "id": "LMR-002",
+      "title": "StateStore SQLite WAL",
+      "userStory": "US-002",
+      "depends": ["LMR-001"],
+      "parallel": true,
+      "branch": "feat/state-sqlite"
+    },
+    {
+      "id": "LMR-003",
+      "title": "WorkspaceManager",
+      "userStory": "US-003",
+      "depends": ["LMR-001"],
+      "parallel": true,
+      "branch": "feat/workspace"
+    },
+    {
+      "id": "LMR-004",
+      "title": "SafetyChecks 风险分级",
+      "userStory": "US-004",
+      "depends": ["LMR-001"],
+      "parallel": true,
+      "branch": "feat/safety-checks"
+    },
+    {
+      "id": "LMR-005",
+      "title": "PlanParser + DAGValidator",
+      "userStory": "US-005",
+      "depends": ["LMR-001"],
+      "parallel": true,
+      "branch": "feat/plan-parser"
+    },
+    {
+      "id": "LMR-006",
+      "title": "ProcessManager spawn + stream-json",
+      "userStory": "US-006",
+      "depends": ["LMR-001"],
+      "parallel": true,
+      "branch": "feat/process-manager"
+    },
+    {
+      "id": "LMR-007",
+      "title": "StatusDetector 9 状态",
+      "userStory": "US-007",
+      "depends": ["LMR-002", "LMR-006"],
+      "parallel": false,
+      "branch": "feat/status-detector"
+    },
+    {
+      "id": "LMR-008",
+      "title": "LoomerApp 核心编排",
+      "userStory": "US-008",
+      "depends": ["LMR-002", "LMR-003", "LMR-004", "LMR-006", "LMR-007"],
+      "parallel": false,
+      "branch": "feat/app-core"
+    },
+    {
+      "id": "LMR-009",
+      "title": "PlanExecutor DAG 调度",
+      "userStory": "US-009",
+      "depends": ["LMR-005", "LMR-008"],
+      "parallel": false,
+      "branch": "feat/plan-executor"
+    },
+    {
+      "id": "LMR-010",
+      "title": "CLI Commander.js",
+      "userStory": "US-010",
+      "depends": ["LMR-008"],
+      "parallel": false,
+      "branch": "feat/cli"
+    },
+    {
+      "id": "LMR-011",
+      "title": "Web API Express + SSE",
+      "userStory": "US-011",
+      "depends": ["LMR-008"],
+      "parallel": false,
+      "branch": "feat/web-api"
+    },
+    {
+      "id": "LMR-012",
+      "title": "Dashboard HTML 仪表盘",
+      "userStory": "US-012",
+      "depends": ["LMR-011"],
+      "parallel": false,
+      "branch": "feat/dashboard"
+    },
+    {
+      "id": "LMR-013",
+      "title": "Daemon 系统服务",
+      "userStory": "US-013",
+      "depends": ["LMR-001"],
+      "parallel": true,
+      "branch": "feat/daemon"
+    }
+  ]
+}
