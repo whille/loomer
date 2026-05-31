@@ -1,0 +1,214 @@
+import path from "node:path";
+import { Command } from "commander";
+import {
+  CliError,
+  LoomerClient,
+  formatPlanStatus,
+  formatStatusTable,
+} from "./cli-client.js";
+import { LoomerConfig } from "./config.js";
+
+function handleCliError(err: unknown): never {
+  if (err instanceof CliError) {
+    if (err.statusCode === -1 && !err.serverError) {
+      console.error("Loomer server is not running.");
+      console.error("Start it first: loomer plan run --prd <path>");
+    } else {
+      console.error(`Error: ${err.message}`);
+    }
+    process.exit(1);
+  }
+  console.error("Unexpected error:", err);
+  process.exit(1);
+}
+
+export function createProgram(
+  clientFactory?: (config: LoomerConfig) => LoomerClient,
+): Command {
+  const program = new Command();
+  program
+    .name("loomer")
+    .description("Multi-agent orchestration CLI")
+    .version("0.1.0");
+
+  const makeClient = (config: LoomerConfig): LoomerClient =>
+    clientFactory ? clientFactory(config) : new LoomerClient(config);
+
+  const loadConfig = (): LoomerConfig => LoomerConfig.load(".loomer.json");
+
+  // --- Agent lifecycle ---
+
+  program
+    .command("start")
+    .argument("<name>", "Agent name")
+    .requiredOption("--prompt <text>", "Prompt text")
+    .action(async (name: string, opts: { prompt: string }) => {
+      const client = makeClient(loadConfig());
+      try {
+        await client.start(name, opts.prompt);
+        console.log(`Agent "${name}" started.`);
+      } catch (err) {
+        handleCliError(err);
+      }
+    });
+
+  program
+    .command("done")
+    .argument("<name>", "Agent name")
+    .action(async (name: string) => {
+      const client = makeClient(loadConfig());
+      try {
+        await client.done(name);
+        console.log(`Agent "${name}" done.`);
+      } catch (err) {
+        handleCliError(err);
+      }
+    });
+
+  program
+    .command("kill")
+    .argument("<name>", "Agent name")
+    .option("--clean", "Remove agent data after kill")
+    .action(async (name: string, opts: { clean?: boolean }) => {
+      const client = makeClient(loadConfig());
+      try {
+        await client.kill(name, opts.clean);
+        console.log(`Agent "${name}" killed.`);
+      } catch (err) {
+        handleCliError(err);
+      }
+    });
+
+  program
+    .command("retry")
+    .argument("<name>", "Agent name")
+    .action(async (name: string) => {
+      const client = makeClient(loadConfig());
+      try {
+        await client.retry(name);
+        console.log(`Agent "${name}" retried.`);
+      } catch (err) {
+        handleCliError(err);
+      }
+    });
+
+  program
+    .command("accept")
+    .argument("<name>", "Agent name")
+    .action(async (name: string) => {
+      const client = makeClient(loadConfig());
+      try {
+        await client.accept(name);
+        console.log(`Agent "${name}" accepted.`);
+      } catch (err) {
+        handleCliError(err);
+      }
+    });
+
+  program
+    .command("reject")
+    .argument("<name>", "Agent name")
+    .action(async (name: string) => {
+      const client = makeClient(loadConfig());
+      try {
+        await client.reject(name);
+        console.log(`Agent "${name}" rejected.`);
+      } catch (err) {
+        handleCliError(err);
+      }
+    });
+
+  // --- Queries ---
+
+  program
+    .command("log")
+    .argument("<name>", "Agent name")
+    .option("--lines <n>", "Number of lines", "50")
+    .action(async (name: string, opts: { lines: string }) => {
+      const client = makeClient(loadConfig());
+      try {
+        const text = await client.log(name, Number.parseInt(opts.lines, 10));
+        console.log(text);
+      } catch (err) {
+        handleCliError(err);
+      }
+    });
+
+  program
+    .command("status")
+    .option("--all", "Include archived agents")
+    .action(async (opts: { all?: boolean }) => {
+      const client = makeClient(loadConfig());
+      try {
+        const agents = await client.status(opts.all);
+        console.log(formatStatusTable(agents));
+      } catch (err) {
+        handleCliError(err);
+      }
+    });
+
+  // --- Plan ---
+
+  const plan = program.command("plan");
+
+  plan
+    .command("run")
+    .requiredOption("--prd <path>", "Path to PRD JSON file")
+    .action(async (opts: { prd: string }) => {
+      const config = loadConfig();
+      const prdPath = path.resolve(opts.prd);
+
+      try {
+        // app.ts 尚未合入此 worktree，动态 import 允许延迟绑定
+        // @ts-expect-error — app.js 在独立 PR 中实现
+        const { LoomerApp } = await import("./app.js");
+        const loomerApp = new LoomerApp(config);
+
+        const result = loomerApp.runPlan(undefined, prdPath);
+        console.log(
+          `Plan "${result.name}" started with ${result.taskCount} tasks.`,
+        );
+
+        // 优雅关闭
+        const shutdown = (): void => {
+          console.log("\nShutting down...");
+          loomerApp.shutdown();
+          process.exit(0);
+        };
+        process.on("SIGINT", shutdown);
+        process.on("SIGTERM", shutdown);
+      } catch (err) {
+        if (
+          err instanceof Error &&
+          (err.message.includes("Cannot find module") ||
+            err.message.includes("MODULE_NOT_FOUND"))
+        ) {
+          console.error(
+            "LoomerApp is not available. Ensure app.ts is compiled.",
+          );
+          process.exit(1);
+        }
+        throw err;
+      }
+    });
+
+  plan.command("status").action(async () => {
+    const client = makeClient(loadConfig());
+    try {
+      const progress = await client.planStatus();
+      console.log(formatPlanStatus(progress));
+    } catch (err) {
+      handleCliError(err);
+    }
+  });
+
+  return program;
+}
+
+// 入口（仅在直接执行时运行，被 import 时不触发 parse）
+if (
+  process.argv[1]?.endsWith("cli.ts") ||
+  process.argv[1]?.endsWith("cli.js")
+) {
+  createProgram().parse();
+}
