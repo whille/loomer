@@ -1,6 +1,15 @@
 import { type ChildProcess, spawn } from "node:child_process";
+import os from "node:os";
+import path from "node:path";
 import type { LoomerConfig } from "./config.js";
 import type { StateStore } from "./state.js";
+
+// 常见 CLI 工具路径（bun、nvm 等），确保子进程可找到
+const EXTRA_PATHS = [
+  path.join(os.homedir(), ".bun", "bin"),
+  path.join(os.homedir(), ".local", "bin"),
+  "/usr/local/bin",
+];
 
 export interface ProcessInfo {
   name: string;
@@ -27,7 +36,7 @@ export class ProcessManager {
 
   start(name: string, worktreePath: string, prompt: string): void {
     const cmd = this.config.claudePath;
-    // 三件套硬编码不可省略（Dogfooding 教训 8.1）
+    // 非交互模式必须的参数（Dogfooding 教训 8.1 + 8.23）
     const args = [
       "-p",
       prompt,
@@ -35,12 +44,23 @@ export class ProcessManager {
       "stream-json",
       "--verbose",
       "--include-partial-messages",
+      "--disallowed-tools",
+      "AskUserQuestion",
       ...this.config.claudeArgs,
     ];
+
+    const env = { ...process.env };
+    const existingPath = env.PATH ?? "";
+    const pathSet = new Set(existingPath.split(path.delimiter));
+    const extraDirs = EXTRA_PATHS.filter((d) => !pathSet.has(d));
+    if (extraDirs.length > 0) {
+      env.PATH = `${extraDirs.join(path.delimiter)}${path.delimiter}${existingPath}`;
+    }
 
     const child = spawn(cmd, args, {
       cwd: worktreePath,
       stdio: ["pipe", "pipe", "pipe"],
+      env,
     });
 
     // stdin pipe 传 prompt
@@ -81,6 +101,10 @@ export class ProcessManager {
     if (tracked && !tracked.exited) {
       tracked.child.kill("SIGTERM");
     }
+  }
+
+  list(): string[] {
+    return [...this.processes.keys()];
   }
 
   isAlive(name: string): boolean {

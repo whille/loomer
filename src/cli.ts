@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import path from "node:path";
 import { Command } from "commander";
 import {
@@ -118,6 +119,43 @@ export function createProgram(
       }
     });
 
+  // --- Web lifecycle (附属管控) ---
+
+  program
+    .command("web-start")
+    .option("--port <number>", "Port for web dashboard", parseInt)
+    .action(async (opts: { port?: number }) => {
+      const client = makeClient(loadConfig());
+      try {
+        const port = opts.port ?? loadConfig().defaultPort;
+        await client.post(`/api/web/start`, { port });
+      } catch (err) {
+        handleCliError(err);
+      }
+    });
+
+  program
+    .command("web-stop")
+    .action(async () => {
+      const client = makeClient(loadConfig());
+      try {
+        await client.post(`/api/web/stop`);
+      } catch (err) {
+        handleCliError(err);
+      }
+    });
+
+  program
+    .command("shutdown")
+    .action(async () => {
+      const client = makeClient(loadConfig());
+      try {
+        await client.post(`/api/shutdown`);
+      } catch (err) {
+        handleCliError(err);
+      }
+    });
+
   // --- Queries ---
 
   program
@@ -154,17 +192,16 @@ export function createProgram(
   plan
     .command("run")
     .requiredOption("--prd <path>", "Path to PRD JSON file")
-    .action(async (opts: { prd: string }) => {
+    .option("--port <number>", "Web server port", parseInt)
+    .action(async (opts: { prd: string; port?: number }) => {
       const config = loadConfig();
       const prdPath = path.resolve(opts.prd);
 
       try {
-        // app.ts 尚未合入此 worktree，动态 import 允许延迟绑定
-        // @ts-expect-error — app.js 在独立 PR 中实现
         const { LoomerApp } = await import("./app.js");
-        const loomerApp = new LoomerApp(config);
+        const loomerApp = LoomerApp.create(config);
 
-        const result = loomerApp.runPlan(undefined, prdPath);
+        const result = loomerApp.runPlan(undefined, prdPath, opts.port);
         console.log(
           `Plan "${result.name}" started with ${result.taskCount} tasks.`,
         );

@@ -1,4 +1,5 @@
 import { execSync } from "node:child_process";
+import fs from "node:fs";
 import type { LoomerConfig } from "./config.js";
 
 export interface Workspace {
@@ -19,8 +20,27 @@ export class WorkspaceManager {
     const base = baseBranch ?? this.detectBaseBranch();
     const worktreePath = `${this.repoPath}-${name}`;
 
-    // 创建 worktree（同时创建分支）
-    execSync(`git worktree add -b ${branch} "${worktreePath}" ${base}`, {
+    // worktree 已存在时直接返回
+    if (this.worktreeExists(name)) {
+      return { name, path: worktreePath, branch };
+    }
+
+    // 目录残留但非 worktree 时清理
+    if (fs.existsSync(worktreePath)) {
+      fs.rmSync(worktreePath, { recursive: true, force: true });
+      execSync("git worktree prune", {
+        cwd: this.repoPath,
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    }
+
+    // 分支已存在时不带 -b，否则创建新分支
+    const branchExists = this.exists(branch);
+    const cmd = branchExists
+      ? `git worktree add "${worktreePath}" "${branch}"`
+      : `git worktree add -b "${branch}" "${worktreePath}" "${base}"`;
+    execSync(cmd, {
       cwd: this.repoPath,
       encoding: "utf-8",
     });
@@ -40,7 +60,7 @@ export class WorkspaceManager {
       // worktree 不存在时不报错
     }
     try {
-      execSync(`git branch -D ${name}`, {
+      execSync(`git branch -D "${name}"`, {
         cwd: this.repoPath,
         encoding: "utf-8",
         stdio: ["pipe", "pipe", "pipe"],
@@ -86,6 +106,11 @@ export class WorkspaceManager {
     } catch {
       return false;
     }
+  }
+
+  /** 检查 worktree（非分支）是否已注册 */
+  worktreeExists(name: string): boolean {
+    return this.listAll().some((w) => w.name === name);
   }
 
   private detectBaseBranch(): string {

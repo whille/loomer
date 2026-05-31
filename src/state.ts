@@ -6,6 +6,8 @@ import type { LoomerConfig } from "./config.js";
 import { AgentNotFoundError } from "./errors.js";
 import type { IAgentData, IStateStore, Status } from "./status.js";
 
+import type { RiskAssessmentData } from "./types/web.js";
+
 export interface AgentData {
   name: string;
   status: string;
@@ -15,7 +17,7 @@ export interface AgentData {
   started_at: number | null;
   pid: number | null;
   exit_code: number | null;
-  risk_assessment: Record<string, unknown> | null;
+  risk_assessment: RiskAssessmentData | null;
   last_output: string | null;
   pr_url: string | null;
   archived: boolean;
@@ -77,7 +79,7 @@ function rowToAgent(row: Record<string, unknown>): AgentData {
     pid: (row.pid as number | null) ?? null,
     exit_code: (row.exit_code as number | null) ?? null,
     risk_assessment: row.risk_assessment
-      ? (JSON.parse(row.risk_assessment as string) as Record<string, unknown>)
+      ? (JSON.parse(row.risk_assessment as string) as RiskAssessmentData)
       : null,
     last_output: (row.last_output as string | null) ?? null,
     pr_url: (row.pr_url as string | null) ?? null,

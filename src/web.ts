@@ -230,6 +230,32 @@ export function createApp(
     }
   });
 
+  // --- Web lifecycle (附属管控) ---
+
+  app.post("/api/web/stop", (_req, res) => {
+    loomerApp?.stopServer();
+    res.json({ ok: true, message: "Web dashboard stopped." });
+  });
+
+  app.post("/api/web/start", (req, res) => {
+    const port = req.body?.port ? Number(req.body.port) : undefined;
+    const server = loomerApp?.startServer(port);
+    if (server) {
+      res.json({ ok: true, port: loomerApp?.getServerPort() });
+    } else {
+      res.status(400).json({ error: "WebError", message: "Failed to start web dashboard (port in use?)" });
+    }
+  });
+
+  app.post("/api/shutdown", (_req, res) => {
+    res.json({ ok: true, message: "Shutting down..." });
+    // 延迟让响应发出
+    setTimeout(() => {
+      loomerApp?.shutdown();
+      process.exit(0);
+    }, 100);
+  });
+
   // --- SSE ---
 
   app.get("/api/events", (req, res) => {

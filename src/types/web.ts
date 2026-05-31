@@ -77,7 +77,11 @@ export interface LoomerAppLike {
   status(): AgentInfo[];
   log(name: string, lines?: number): string;
   diff(name: string, mode?: string): string;
-  runPlan(path?: string, prdPath?: string): PlanResult;
+  runPlan(path?: string, prdPath?: string, port?: number): PlanResult;
   planStatus(): PlanProgress | null;
   planDag(): DagData | null;
+  startServer(port?: number): unknown;
+  stopServer(): void;
+  getServerPort(): number | null;
+  shutdown(): void;
 }

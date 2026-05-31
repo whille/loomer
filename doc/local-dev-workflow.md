@@ -11,6 +11,14 @@ bun link
 
 这会注册一个全局符号链接，`loomer` 命令指向本地 `dist/cli.js`。
 
+**注意：** `bun link` 可能将文件内容复制而非创建 symlink，导致 ESM `import` 语法被当作 shell 执行。如果 `loomer` 报语法错误，手动创建 wrapper：
+
+```bash
+rm ~/.bun/bin/loomer
+printf '#!/bin/sh\nexec node <loomer-dir>/dist/cli.js "$@"\n' > ~/.bun/bin/loomer
+chmod +x ~/.bun/bin/loomer
+```
+
 ## 代码变更后的调试迭代
 
 ### 方式 A：build + link（常规开发）

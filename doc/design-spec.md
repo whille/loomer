@@ -254,16 +254,18 @@ git merge → 冲突
 
 ---
 
-## 10. 常驻主进程 — LoomerApp 自动启动 Web
+## 10. 常驻主进程 — LoomerApp 管控 Web 附属
 
 **设计约束**:
 
-1. **plan run 即启动主进程**: `loomer plan run --prd` 启动 LoomerApp 主进程 + 内嵌 Web 服务器，无需单独的 `serve` 或 `daemon` 命令
-2. **Web 仪表盘随主进程启动**: 主进程自动启动 Express 服务器（默认端口 3000），提供 REST API + SSE + 仪表盘
-3. **CLI HTTP 薄客户端**: 其余子命令（done/kill/retry/accept/reject/log/status）通过 HTTP 发给运行中的主进程；主进程未运行时 status/log 可直读 SQLite（只读）
-4. **主进程退出条件**: 计划完成且无活跃 agent 时主进程自动退出
-5. **SIGINT/SIGTERM 优雅关闭**: 捕获信号 → 停止轮询 → 关闭 HTTP 服务器
-6. **LoomerApp.create() 工厂方法**: CLI 入口必须通过 `LoomerApp.create(config)` 工厂方法创建实例（内部构建依赖），构造函数保留给测试（依赖注入）
+1. **plan run 即启动主进程**: `loomer plan run --prd` 启动 LoomerApp 主进程 + Web 仪表盘
+2. **Web 是附属组件**: LoomerApp 持有 Web，可独立启停（`startServer()`/`stopServer()`），Web 不绑架主进程生命周期
+3. **Web 自动关闭**: 全终态且无 REVIEW/CONFLICTED → 自动 `stopServer()` 释放端口；有 REVIEW/CONFLICTED 则保留
+4. **Web 手动管控**: CLI `loomer web-start [--port]`/`loomer web-stop` + API `POST /api/web/start|stop`
+5. **CLI HTTP 薄客户端**: 其余子命令（done/kill/retry/accept/reject/log/status）通过 HTTP 发给运行中的主进程；主进程未运行时 status/log 可直读 SQLite（只读）
+6. **SIGINT/SIGTERM 优雅关闭**: 捕获信号 → 停止轮询 → 停止 Web → 杀子进程 → 退出
+7. **LoomerApp.create() 工厂方法**: CLI 入口必须通过 `LoomerApp.create(config)` 工厂方法创建实例（内部构建依赖），构造函数保留给测试（依赖注入）
+8. **全局 shutdown**: CLI `loomer shutdown` + API `POST /api/shutdown` → 优雅关闭整个 LoomerApp
 
 **取消 daemon**: LoomerApp 作为常驻主进程运行，不需要 launchd/systemd 后台服务。用户通过 `loomer plan run` 启动，按 Ctrl+C 或等待计划完成后自动退出。
 

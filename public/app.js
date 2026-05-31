@@ -16,8 +16,6 @@
   const $planForm = document.getElementById("plan-form");
   const $dagPanel = document.getElementById("dag-panel");
   const $dagName = document.getElementById("dag-plan-name");
-  const $dagProgress = document.getElementById("dag-progress");
-  const $dagNodes = document.getElementById("dag-nodes");
   const $logModal = document.getElementById("log-modal");
   const $logTitle = document.getElementById("log-modal-title");
   const $logBody = document.getElementById("log-modal-body");
@@ -35,13 +33,13 @@
   const ACTIONS = {
     PENDING: [],
     RUNNING: [{ action: "kill", label: "Kill", cls: "btn-danger" }],
-    DONE: [],
-    CRASHED: [],
+    DONE: [{ action: "done", label: "Merge", cls: "btn-success" }],
+    CRASHED: [{ action: "retry", label: "Retry", cls: "btn-warning" }],
     CONFLICTED: [
       { action: "retry", label: "Resolve", cls: "btn-warning" },
       { action: "kill", label: "Discard", cls: "btn-danger", query: "?clean=1" },
     ],
-    STALE: [],
+    STALE: [{ action: "retry", label: "Retry", cls: "btn-warning" }],
     REVIEW: [
       { action: "accept", label: "Accept", cls: "btn-success" },
       { action: "reject", label: "Reject", cls: "btn-danger" },
@@ -49,6 +47,10 @@
     ACCEPTED: [],
     REJECTED: [],
   };
+
+  // 非运行状态均可 Delete（clean=1）
+  const DELETE_ACTION = { action: "kill", label: "Delete", cls: "btn-danger", query: "?clean=1" };
+  const NON_DELETABLE = new Set(["RUNNING", "PENDING"]);
 
   // --- API helpers ---
   async function apiPost(url) {
@@ -109,7 +111,8 @@
       // actions
       const tdActions = document.createElement("td");
       tdActions.className = "agent-actions";
-      const btns = ACTIONS[agent.status] || [];
+      const btns = (ACTIONS[agent.status] || []).slice();
+      if (!NON_DELETABLE.has(agent.status)) btns.push(DELETE_ACTION);
       for (const b of btns) {
         const btn = document.createElement("button");
         btn.className = "btn btn-icon " + b.cls;
@@ -144,9 +147,9 @@
     }
   }
 
-  function handleAction(name, action, btn) {
+  function handleAction(name, action, btn, query) {
     btn.disabled = true;
-    const url = "/api/" + action + "/" + encodeURIComponent(name);
+    const url = "/api/" + action + "/" + encodeURIComponent(name) + (query || "");
     apiPost(url)
       .then(() => fetchAgents())
       .catch((err) => {
@@ -293,6 +296,16 @@
   });
 
   // --- DAG / Plan ---
+  const STAT_DOTS = [
+    { key: "done",      cls: "dot-done",      label: "done" },
+    { key: "running",   cls: "dot-running",   label: "running" },
+    { key: "pending",   cls: "dot-pending",   label: "pending" },
+    { key: "crashed",   cls: "dot-crashed",   label: "crashed" },
+    { key: "conflicted", cls: "dot-conflicted", label: "conflicted" },
+    { key: "stale",     cls: "dot-stale",     label: "stale" },
+    { key: "review",    cls: "dot-review",    label: "review" },
+  ];
+
   function loadPlan() {
     fetch("/api/plan/status")
       .then((r) => r.json())
@@ -303,13 +316,23 @@
         }
         $dagPanel.style.display = "";
         $dagName.textContent = progress.plan || "-";
-        $dagProgress.textContent =
-          "total: " + progress.total +
-          " | running: " + progress.running +
-          " | done: " + progress.done +
-          " | pending: " + progress.pending +
-          " | crashed: " + progress.crashed +
-          " | review: " + progress.review;
+
+        // 进度条
+        const total = progress.total || 1;
+        const done = progress.done || 0;
+        const pct = Math.round(done / total * 100);
+        const $bar = document.getElementById("dag-progress-bar");
+        const $pct = document.getElementById("dag-progress-pct");
+        if ($bar) $bar.style.width = pct + "%";
+        if ($pct) $pct.textContent = pct + "%";
+
+        // 统计圆点
+        const $stats = document.getElementById("dag-stats");
+        if ($stats) {
+          $stats.innerHTML = STAT_DOTS.map(d =>
+            '<span><i class="stat-dot ' + d.cls + '"></i>' + (progress[d.key] || 0) + " " + d.label + "</span>"
+          ).join("");
+        }
 
         // load DAG nodes+edges
         fetch("/api/plan/dag")
@@ -326,27 +349,89 @@
       return;
     }
 
-    $dagNodes.innerHTML = "";
-    for (const node of dag.nodes) {
-      const div = document.createElement("div");
-      div.className = "dag-node";
-      div.innerHTML =
-        '<span class="badge badge-' + esc(node.status) + '">' + esc(node.id) + "</span>";
-      $dagNodes.appendChild(div);
+    const svg = document.getElementById("dag-svg");
+    // 清除旧节点/边（保留 defs）
+    svg.querySelectorAll(".dag-node,.dag-edge").forEach(el => el.remove());
+
+    const nodes = dag.nodes || [];
+    const edges = dag.edges || [];
+
+    // BFS 拓扑分层
+    const layerMap = {};
+    nodes.forEach(n => { layerMap[n.id] = 0; });
+
+    let changed = true;
+    let iterations = 0;
+    while (changed && iterations < nodes.length + 1) {
+      changed = false;
+      iterations++;
+      edges.forEach(e => {
+        if (layerMap[e.to] <= layerMap[e.from]) {
+          layerMap[e.to] = layerMap[e.from] + 1;
+          changed = true;
+        }
+      });
     }
 
-    // edges as text below nodes
-    if (dag.edges && dag.edges.length > 0) {
-      const edgeDiv = document.createElement("div");
-      edgeDiv.style.marginTop = "8px";
-      for (const edge of dag.edges) {
-        const span = document.createElement("div");
-        span.className = "dag-edge";
-        span.textContent = edge.from + " → " + edge.to;
-        edgeDiv.appendChild(span);
-      }
-      $dagNodes.appendChild(edgeDiv);
-    }
+    const maxLayer = Math.max(0, ...Object.values(layerMap));
+    const layers = Array.from({ length: maxLayer + 1 }, () => []);
+    nodes.forEach(n => layers[layerMap[n.id]].push(n));
+
+    const nodeW = 120, nodeH = 32, gapX = 40, gapY = 16, padX = 20, padY = 20;
+    let maxW = 0;
+    layers.forEach(layer => {
+      const w = layer.length * nodeW + (layer.length - 1) * gapX;
+      if (w > maxW) maxW = w;
+    });
+
+    svg.setAttribute("width", maxW + padX * 2);
+    svg.setAttribute("height", (maxLayer + 1) * (nodeH + gapY) + padY * 2);
+
+    // 计算节点位置
+    const posMap = {};
+    layers.forEach((layer, li) => {
+      const layerW = layer.length * nodeW + (layer.length - 1) * gapX;
+      const offsetX = (maxW - layerW) / 2 + padX;
+      layer.forEach((n, ni) => {
+        const x = offsetX + ni * (nodeW + gapX);
+        const y = padY + li * (nodeH + gapY);
+        posMap[n.id] = { x, y };
+      });
+    });
+
+    // 绘制 bezier 边（带箭头）
+    edges.forEach(e => {
+      const from = posMap[e.from], to = posMap[e.to];
+      if (!from || !to) return;
+      const x1 = from.x + nodeW / 2, y1 = from.y + nodeH;
+      const x2 = to.x + nodeW / 2, y2 = to.y;
+      const midY = (y1 + y2) / 2;
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("class", "dag-edge");
+      path.setAttribute("d", "M" + x1 + "," + y1 + " C" + x1 + "," + midY + " " + x2 + "," + midY + " " + x2 + "," + y2);
+      svg.appendChild(path);
+    });
+
+    // 绘制颜色编码节点
+    nodes.forEach(n => {
+      const pos = posMap[n.id];
+      const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      g.setAttribute("class", "dag-node " + n.status.toLowerCase());
+      g.setAttribute("transform", "translate(" + pos.x + "," + pos.y + ")");
+
+      const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      rect.setAttribute("width", nodeW);
+      rect.setAttribute("height", nodeH);
+      g.appendChild(rect);
+
+      const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      text.setAttribute("x", nodeW / 2);
+      text.setAttribute("y", nodeH / 2);
+      text.textContent = n.id;
+      g.appendChild(text);
+
+      svg.appendChild(g);
+    });
   }
 
   // --- SSE ---

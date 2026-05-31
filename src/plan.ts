@@ -59,11 +59,21 @@ export function fromPrdJson(prdPath: string, maxConcurrent?: number): PlanSpec {
     const tasks: TaskSpec[] = taskSplit.map((ts) => {
       const storyId = ts.userStory as string;
       const story = storyMap.get(storyId);
-      const prompt =
+      const basePrompt =
         story?.description || story?.title || `Task ${ts.id as string}`;
+      // 将 acceptance criteria 注入 prompt，避免 agent 因信息不足而交互式提问
+      const criteria = (story?.acceptanceCriteria as unknown as string[]) ?? [];
+      const promptParts = [basePrompt];
+      if (criteria.length > 0) {
+        promptParts.push("\n\nAcceptance Criteria:");
+        for (const c of criteria) {
+          promptParts.push(`- ${c}`);
+        }
+      }
+      promptParts.push("\n\nImportant: Do NOT ask clarifying questions. Implement based on the criteria above. Commit all changes.");
       return {
         id: ts.id as string,
-        prompt,
+        prompt: promptParts.join(""),
         dependsOn: (ts.depends as string[]) ?? [],
       };
     });

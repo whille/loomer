@@ -24,9 +24,16 @@
 
   <!-- DAG Panel (hidden when no plan) -->
   <div class="dag-panel" id="dag-panel" style="display:none">
-    <h2>Plan: <span id="dag-plan-name"></span></h2>
-    <div class="dag-progress" id="dag-progress"></div>
-    <div class="dag-nodes" id="dag-nodes"></div>
+    <h2>Plan: <span id="dag-plan-name"></span> <span id="dag-progress-pct" class="dag-pct"></span></h2>
+    <div class="dag-progress-track">
+      <div class="dag-progress-bar" id="dag-progress-bar"></div>
+    </div>
+    <div class="dag-stats" id="dag-stats"></div>
+    <div class="dag-container">
+      <svg id="dag-svg" xmlns="http://www.w3.org/2000/svg">
+        <defs><marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#484f58"/></marker></defs>
+      </svg>
+    </div>
   </div>
 
   <!-- Agent Table -->

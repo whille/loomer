@@ -297,37 +297,100 @@ body {
   font-size: 15px;
   margin-bottom: 12px;
   color: var(--text-bright);
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.dag-progress {
-  font-size: 13px;
-  color: var(--text-dim);
+.dag-pct {
+  font-size: 14px;
+  color: var(--c-accepted);
+  font-weight: 700;
+}
+
+/* 进度条 */
+.dag-progress-track {
+  background: var(--bg);
+  border-radius: 4px;
+  height: 8px;
+  overflow: hidden;
   margin-bottom: 12px;
 }
 
-.dag-nodes {
+.dag-progress-bar {
+  height: 100%;
+  background: var(--c-accepted);
+  transition: width 0.3s;
+  width: 0%;
+}
+
+/* 统计圆点 */
+.dag-stats {
   display: flex;
+  gap: 16px;
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-bottom: 12px;
   flex-wrap: wrap;
-  gap: 12px;
 }
 
-.dag-node {
-  padding: 8px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg);
-  font-family: 'SF Mono', Menlo, monospace;
-  font-size: 12px;
-}
-
-.dag-edge {
+.dag-stats span {
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 11px;
-  color: var(--text-dim);
-  padding: 4px 0;
 }
+
+.stat-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.dot-done      { background: var(--c-done); }
+.dot-running   { background: var(--c-running); }
+.dot-pending   { background: var(--c-pending); }
+.dot-crashed   { background: var(--c-crashed); }
+.dot-conflicted { background: var(--c-conflicted); }
+.dot-stale     { background: var(--c-stale); }
+.dot-review    { background: var(--c-review); }
+
+/* DAG SVG */
+.dag-container {
+  overflow-x: auto;
+}
+
+#dag-svg .dag-node rect {
+  rx: 6;
+  ry: 6;
+  stroke-width: 2;
+}
+
+#dag-svg .dag-node text {
+  font-size: 12px;
+  font-family: 'SF Mono', Menlo, monospace;
+  fill: var(--text);
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
+#dag-svg .dag-edge {
+  stroke: var(--border);
+  stroke-width: 1.5;
+  fill: none;
+  marker-end: url(#arrowhead);
+}
+
+/* 按状态着色节点 */
+#dag-svg .dag-node.done rect      { fill: rgba(6, 182, 212, 0.13); stroke: var(--c-done); }
+#dag-svg .dag-node.running rect   { fill: rgba(59, 130, 246, 0.13); stroke: var(--c-running); }
+#dag-svg .dag-node.pending rect   { fill: var(--bg); stroke: var(--c-pending); }
+#dag-svg .dag-node.crashed rect   { fill: rgba(239, 68, 68, 0.13); stroke: var(--c-crashed); }
+#dag-svg .dag-node.conflicted rect { fill: rgba(249, 115, 22, 0.13); stroke: var(--c-conflicted); }
+#dag-svg .dag-node.stale rect     { fill: rgba(234, 179, 8, 0.13); stroke: var(--c-stale); }
+#dag-svg .dag-node.review rect    { fill: rgba(139, 92, 246, 0.13); stroke: var(--c-review); }
+#dag-svg .dag-node.accepted rect  { fill: rgba(34, 197, 94, 0.13); stroke: var(--c-accepted); }
+#dag-svg .dag-node.rejected rect  { fill: rgba(236, 72, 153, 0.13); stroke: var(--c-rejected); }
 
 /* === Plan Form === */
 .plan-form {
