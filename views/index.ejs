@@ -1,0 +1,74 @@
+<div class="header">
+  <h1>Loomer</h1>
+  <div class="header-right">
+    <div class="sse-indicator">
+      <span class="sse-dot" id="sse-dot"></span>
+      <span id="sse-label">disconnected</span>
+    </div>
+  </div>
+</div>
+
+<main class="main">
+  <!-- Start Agent Form -->
+  <form class="start-form" id="start-form">
+    <input type="text" id="input-name" placeholder="agent name" required pattern="[a-zA-Z0-9_-]{1,64}" title="Letters, digits, hyphens, underscores. Max 64.">
+    <input type="text" id="input-prompt" class="prompt-input" placeholder="prompt" required>
+    <button type="submit" class="btn btn-primary">Start</button>
+  </form>
+
+  <!-- Plan Form -->
+  <form class="plan-form" id="plan-form">
+    <input type="text" id="input-plan-path" placeholder="plan.md or prd.json path">
+    <button type="submit" class="btn">Run Plan</button>
+  </form>
+
+  <!-- DAG Panel (hidden when no plan) -->
+  <div class="dag-panel" id="dag-panel" style="display:none">
+    <h2>Plan: <span id="dag-plan-name"></span></h2>
+    <div class="dag-progress" id="dag-progress"></div>
+    <div class="dag-nodes" id="dag-nodes"></div>
+  </div>
+
+  <!-- Agent Table -->
+  <div id="agent-container">
+    <table class="agent-table" id="agent-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Status</th>
+          <th>Branch</th>
+          <th>Prompt</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="agent-tbody"></tbody>
+    </table>
+    <div class="empty-state" id="empty-state" style="display:none">
+      <p>No agents yet. Start one above.</p>
+    </div>
+  </div>
+</main>
+
+<!-- Log Modal -->
+<div class="modal-overlay" id="log-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="log-modal-title">Log</h3>
+      <button class="modal-close" id="log-modal-close">&times;</button>
+    </div>
+    <div class="modal-body" id="log-modal-body"></div>
+  </div>
+</div>
+
+<!-- Diff Modal -->
+<div class="modal-overlay" id="diff-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="diff-modal-title">Diff</h3>
+      <button class="modal-close" id="diff-modal-close">&times;</button>
+    </div>
+    <div class="modal-body" id="diff-modal-body"></div>
+  </div>
+</div>
+
+<script src="/app.js"></script>
