@@ -1,7 +1,5 @@
 # Loomer 状态机
 
-> 设计约束来源：conductor-ui `conductor/core/status.py`
-
 ## 9 种状态
 
 | 状态 | 说明 | 是否终态 |
@@ -31,6 +29,12 @@
 **CWD 问题**: 所有 git 命令必须显式指定 cwd=worktree 绝对路径，不依赖 CWD。
 
 **缺字段防御**: agent 数据可能缺少 pid/started_at/worktree 等字段，读取必须容错。→ 详见 [technical-decisions.md §8](technical-decisions.md)
+
+**WorkspaceManager 幂等**: create() 必须容忍 worktree/分支/目录已存在。runPlan() 预创建和 start() 双重调用不能崩溃。
+
+**merge 在主仓库执行**: _mergeAgent() 的 `git merge` 必须在主仓库目录（repoPath）执行，不在 worktree 中。worktree 中的 `git checkout master` 不会影响主仓库。
+
+**变更检测用 git status**: _mergeAgent() 判断"是否有变更"必须用 `git status --porcelain`，不能用 `git diff --cached --quiet`（agent 可能已自行 commit 导致 staged 无 diff）。
 
 ## 状态转换图
 
@@ -75,7 +79,7 @@ PENDING ──start()──→ RUNNING
 8. **worktree 有未提交变更** → auto-commit + DONE
 9. **以上都不满足** → CRASHED
 
-**不变量**: 优先级顺序是设计约束，具体检测手段因语言/平台而异。Node.js 中 `child.on('exit')` 替代 Python `proc.wait()`/`proc.poll()`，但 exit_code 作为权威来源的语义不变。
+**不变量**: 优先级顺序是设计约束，具体检测手段因语言/平台而异。exit_code 作为权威来源的语义不变，具体检测手段因运行时而异。
 
 ## Transition Callback
 

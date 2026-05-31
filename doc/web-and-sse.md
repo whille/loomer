@@ -1,7 +1,5 @@
 # Loomer Web 层 + SSE 设计
 
-> 设计约束来源：conductor-ui `conductor/web.py` + `conductor/templates/index.html`
-
 ## 设计约束
 
 1. **SSE 只推变化**: 不每个轮询周期发全量，只发状态变化的 agent
@@ -116,3 +114,8 @@ app.use((err, req, res, next) => {
 | 4 | _plan_executor 为 null | planStatus() 必须有从存储重建的兜底路径，Web 重启后尤甚 |
 | 9 | CWD 问题 | Express 可能以不同 CWD 启动，git 命令必须用绝对路径 |
 | 10 | 缺字段防御 | status API 返回的 agent 数据可能缺字段，前端 JS 必须容错 |
+| 13 | DAG 必须用 SVG 拓扑可视化 | flex-wrap div 不可接受，必须 BFS 拓扑分层 + 贝塞尔曲线有向边 + 箭头 + 颜色编码 + 点击高亮 |
+| 14 | Plan 进度必须有进度条 | 纯文本不可接受，必须 DOM 进度条 + 百分比 + CSS 动画 |
+| 15 | Agent 操作按钮必须完整 | DONE→Merge, CRASHED/STALE→Retry, 非活跃→Delete(clean=1)，后端路由已存在 |
+| 16 | Plan 统计必须有可视化色点 | 纯文本不可接受，必须色点 + 标签 |
+| 17 | 端口冲突不能崩溃 | startServer() EADDRINUSE 必须降级运行（不启动 dashboard 但不退出） |

@@ -1,7 +1,4 @@
-# Loomer API 规格 — 从 conductor-ui Python API 转换
-
-> 来源：conductor-ui 17 个 Python 模块，2,657 行核心代码
-> 转换原则：保持功能 1:1 对应，改进 Node.js 不擅长的部分（fcntl → SQLite WAL）
+# Loomer API 规格
 
 ---
 
@@ -31,7 +28,7 @@ interface LoomerConfig {
 static load(configPath?: string, overrides?: Partial<LoomerConfig>): LoomerConfig
 ```
 
-**Python 差异：** 新增 `createPr`，新增 per-project `.loomer.json` 覆盖，端口改为 3000。
+**新增：** createPr, per-project .loomer.json 覆盖，端口 3000
 
 ---
 
@@ -52,8 +49,6 @@ class PlanNotFoundError extends LoomerError {}
 class PlanAlreadyActiveError extends LoomerError {}
 ```
 
-1:1 对应，无差异。
-
 ---
 
 ## 3. 状态 — `src/state.js`
@@ -62,7 +57,7 @@ class PlanAlreadyActiveError extends LoomerError {}
 class StateStore {
   constructor(config: LoomerConfig, repoPath: string)
 
-  // 核心方法（1:1 对应 Python）
+  // 核心方法
   load(): State
   save(state: State): void
   updateAgent(name: string, fields: Record<string, unknown>): void
@@ -75,15 +70,14 @@ class StateStore {
   getPendingAgents(): Agent[]
   getRunningCount(): number
 
-  // Archive（新功能，Python 无）
+  // Archive 机制
   archiveAgent(name: string): void
   getActiveAgents(): Agent[]      // 过滤 archived
   getArchivedAgents(): Agent[]   // 只看 archived
 }
 ```
 
-**Loomer 差异：**
-- 文件锁 → **SQLite WAL** 原子写入，跨平台
+**特性：**
 - 新增 `archiveAgent()` / `getActiveAgents()` / `getArchivedAgents()`
 - Agent 数据新增 `archived: boolean` 和 `prUrl: string | null` 字段
 
@@ -116,8 +110,7 @@ class ProcessManager {
 }
 ```
 
-**Loomer 差异：**
-- `child_process.spawn` 替代 Popen，stdout pipe 实时消费 stream-json
+**进程管理：** spawn + stdout pipe 实时消费 stream-json
 - stream-json 事件格式详见 [technical-decisions.md §3](technical-decisions.md)
 
 ---
@@ -147,7 +140,7 @@ class StatusDetector {
 }
 ```
 
-1:1 对应。`_isPidAlive` 用 `process.kill(pid, 0)` (Node.js `process.kill` 语义相同)。
+PID 检测用 `process.kill(pid, 0)`。
 
 **RUNNING → 终态 转换规则（检测优先级）：**
 
@@ -192,7 +185,7 @@ class SafetyChecks {
 }
 ```
 
-1:1 对应。6 个风险信号定义详见 [risk-assessment.md](risk-assessment.md)
+6 个风险信号定义详见 [risk-assessment.md](risk-assessment.md)
 
 详见 [risk-assessment.md](risk-assessment.md)
 
@@ -217,7 +210,7 @@ class WorkspaceManager {
 }
 ```
 
-1:1 对应。git worktree 命令行操作，`child_process.execSync`。
+git worktree 命令行操作，`child_process.execSync`。
 
 ---
 
@@ -256,7 +249,7 @@ class PlanExecutor {
 }
 ```
 
-**Python 差异：** YAML 子集解析器 → 用 `js-yaml` 包替代手写解析器。
+**YAML 解析：** 使用 `js-yaml` 包。
 
 **DAGValidator 规则：**
 1. task ID 合法：`^[a-zA-Z0-9_-]+$`，≤ 64 字符
@@ -284,7 +277,7 @@ class PlanExecutor {
 class LoomerApp {
   constructor(config?: LoomerConfig, ...)
 
-  // Agent 生命周期（1:1 对应 Python）
+  // Agent 生命周期
   start(name: string, prompt: string): void
   done(name: string): void     // 风险分级 merge + PR + archive
   accept(name: string): void
@@ -308,7 +301,7 @@ class LoomerApp {
 }
 ```
 
-**Python 差异：**
+**特性：**
 - `done()` 内自动 archive
 - `_createPr()` 用 `child_process.execSync('gh pr create ...')`
 - `_countPlanProgress` 覆盖所有状态含 stale/review/rejected
@@ -318,7 +311,7 @@ class LoomerApp {
 ## 10. CLI — `src/cli.js`
 
 ```typescript
-// 子命令（1:1 对应 Python）
+// 子命令
 loomer start <name> --prompt <text>
 loomer done <name>
 loomer kill <name> [--clean]
@@ -327,19 +320,13 @@ loomer accept <name>
 loomer reject <name>
 loomer log <name> [--lines 50]
 loomer status [--all]      // --all 含 archived
-loomer serve [--port 3000]
-loomer plan run --prd <path>
+loomer plan run --prd <path>  // 启动 LoomerApp 主进程 + Web 服务器
 loomer plan status
-
-// Daemon 子命令
-loomer daemon install
-loomer daemon uninstall
-loomer daemon start
-loomer daemon stop
-loomer daemon status
 ```
 
-**Python 差异：** 新增 `--all` 显示 archived agent。
+**架构**: CLI 是 HTTP 薄客户端，通过 `LoomerClient` 与运行中的 LoomerApp 主进程通信。`plan run` 是唯一启动主进程的命令，其余子命令通过 HTTP 发给主进程。主进程未运行时 `status`/`log` 可直读 SQLite（只读），写操作提示先启动主进程。
+
+**架构说明：** 无 serve 子命令（Web 由主进程自动启动），无 daemon 子命令（主进程即常驻进程）。新增 --all 显示 archived agent。
 
 ---
 
@@ -348,7 +335,7 @@ loomer daemon status
 ```typescript
 createApp(config?: LoomerConfig, app?: LoomerApp): Express
 
-// REST API（1:1 对应 Python + 归档增强）
+// REST API（+ 归档增强）
 GET  /                          // dashboard
 GET  /api/status?archived=false // 列表，默认不含 archived
 POST /api/start                 // {name, prompt}
@@ -365,64 +352,4 @@ GET  /api/plan/status            // 计划进度
 GET  /api/plan/dag               // DAG 结构
 ```
 
-**Python 差异：** `status` 端点新增 `archived` 查询参数。
-
----
-
-## 12. Daemon — `src/daemon/`
-
-```typescript
-// 抽象后端（1:1 对应 Python）
-abstract class DaemonBackend {
-  abstract install(): void
-  abstract uninstall(): void
-  abstract start(): void
-  abstract stop(): void
-  abstract status(): string  // "running" | "stopped" | "unknown"
-}
-
-class LaunchdBackend extends DaemonBackend { ... }   // macOS
-class SystemdBackend extends DaemonBackend { ... }   // Linux
-
-class DaemonManager {
-  constructor(backend?: DaemonBackend)  // 自动检测平台
-  install(): void
-  uninstall(): void
-  start(): void
-  stop(): void
-  status(): string
-}
-
-class DaemonMetadata {
-  constructor(stateDir: string)
-  load(): object
-  save(data: object): void
-  getPid(): number | null
-  setPid(pid: number): void
-  getStartedAt(): number | null
-  markStopped(): void
-  isRunning(): boolean
-}
-```
-
-1:1 对应。
-
----
-
-## 模块对照表
-
-| # | Python 模块 | Node.js 模块 | 行数(Python) | 差异 |
-|---|------------|--------------|-------------|------|
-| 1 | config.py | config.js | 57 | +createPr, +per-project |
-| 2 | errors.py | errors.js | 44 | 1:1 |
-| 3 | state.py | state.js | 92 | +archive, fcntl→SQLite WAL |
-| 4 | process.py | process.js | 156 | Popen→spawn, stream-json pipe |
-| 5 | status.py | status.js | 163 | 1:1 |
-| 6 | safety.py | safety.js | 130 | 1:1 |
-| 7 | workspace.py | workspace.js | 56 | 1:1 |
-| 8 | plan.py | plan.js | 287 | YAML→js-yaml |
-| 9 | app.py | app.js | 455 | +archive, +createPr |
-| 10 | cli.py | cli.js | 143 | +--all |
-| 11 | web.py | web.js | 132 | +archived param |
-| 12 | daemon/ | daemon/ | 271 | 1:1 |
-| | **合计** | | **2,657** | |
+**状态端点：** 新增 archived 查询参数过滤。

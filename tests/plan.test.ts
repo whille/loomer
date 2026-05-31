@@ -33,7 +33,7 @@ describe("PlanParser", () => {
       expect(spec.name).toBe("test-project");
       expect(spec.tasks).toHaveLength(2);
       expect(spec.tasks[0].id).toBe("TS-001");
-      expect(spec.tasks[0].prompt).toBe("First task");
+      expect(spec.tasks[0].prompt).toContain("First task");
       expect(spec.tasks[1].dependsOn).toEqual(["TS-001"]);
 
       fs.rmSync(dir, { recursive: true, force: true });
@@ -53,7 +53,8 @@ describe("PlanParser", () => {
       }));
 
       const spec = PlanParser.fromPrdJson(prdPath);
-      expect(spec.tasks[0].prompt).toBe("Fallback title");
+      expect(spec.tasks[0].prompt).toContain("Fallback title");
+      expect(spec.tasks[0].prompt).toContain("Do NOT ask clarifying questions");
 
       fs.rmSync(dir, { recursive: true, force: true });
     });

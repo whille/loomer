@@ -5,9 +5,9 @@ import type { LoomerConfig } from "./config.js";
 import { AgentNotFoundError, MergeError } from "./errors.js";
 import { autoResolveConflictFile } from "./merge.js";
 import { DAGValidator, PlanExecutor, PlanParser } from "./plan.js";
-import type { ProcessManager } from "./process.js";
+import { ProcessManager } from "./process.js";
 import { type RiskAssessment, SafetyChecks } from "./safety.js";
-import type { AgentData, StateStore } from "./state.js";
+import { type AgentData, StateStore } from "./state.js";
 import {
   type IProcessManager,
   type IStateStore,
@@ -21,7 +21,7 @@ import type {
   PlanResult,
 } from "./types/web.js";
 import { createApp } from "./web.js";
-import type { WorkspaceManager } from "./workspace.js";
+import { WorkspaceManager } from "./workspace.js";
 
 export class LoomerApp {
   private readonly config: LoomerConfig;
@@ -33,7 +33,17 @@ export class LoomerApp {
   private readonly repoPath: string;
   private planExecutor: PlanExecutor | null = null;
   private server: http.Server | null = null;
+  private serverPort: number | null = null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
+
+  /** 从 config 创建完整 LoomerApp（CLI 入口用） */
+  static create(config: LoomerConfig, repoPath?: string): LoomerApp {
+    const resolved = repoPath ?? process.cwd();
+    const state = new StateStore(config, resolved);
+    const processManager = new ProcessManager(config, state);
+    const workspaceManager = new WorkspaceManager(config, resolved);
+    return new LoomerApp(config, state, processManager, workspaceManager, undefined, resolved);
+  }
 
   constructor(
     config: LoomerConfig,
@@ -83,6 +93,27 @@ export class LoomerApp {
       name,
       this.config.baseBranch || undefined,
     );
+
+    // 依赖任务完成后主分支有新代码，rebase worktree 以获取最新
+    const baseBranch = this.config.baseBranch || "master";
+    try {
+      execSync(`git rebase ${baseBranch}`, {
+        cwd: ws.path,
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    } catch {
+      // rebase 冲突时中止，让 agent 从干净状态开始
+      try {
+        execSync("git rebase --abort", {
+          cwd: ws.path,
+          encoding: "utf-8",
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+      } catch {
+        // 忽略
+      }
+    }
 
     // 启动 agent 进程
     this.processManager.start(name, ws.path, prompt);
@@ -140,7 +171,7 @@ export class LoomerApp {
       this.state.archiveAgent(name);
     } else if (strategy === "always") {
       this.state.updateAgentStatus(name, "REVIEW");
-      this._createPr(name, agent.worktree);
+      this._createPr(name);
     } else {
       // auto
       if (assessment.level === "LOW") {
@@ -149,7 +180,7 @@ export class LoomerApp {
         this.state.archiveAgent(name);
       } else {
         this.state.updateAgentStatus(name, "REVIEW");
-        this._createPr(name, agent.worktree);
+        this._createPr(name);
       }
     }
 
@@ -223,7 +254,7 @@ export class LoomerApp {
 
   // === 计划 ===
 
-  runPlan(planPath?: string, prdPath?: string): PlanResult {
+  runPlan(planPath?: string, prdPath?: string, port?: number): PlanResult {
     // 清理旧计划残留
     const existingPlan = this.state.getPlan();
     if (existingPlan) {
@@ -275,11 +306,11 @@ export class LoomerApp {
       }
     }
 
-    // 启动内嵌 Web 服务器
-    this.startServer(this.config.defaultPort);
-
     // 启动 StatusDetector 轮询
     this.startStatusPolling();
+
+    // 启动 Web 仪表盘（附属，可独立关闭）
+    this.startServer(port ?? this.config.defaultPort);
 
     return { name: spec.name, taskCount: spec.tasks.length };
   }
@@ -310,13 +341,42 @@ export class LoomerApp {
     return { nodes, edges };
   }
 
-  // === 服务器 ===
+  // === 服务器（附属，可独立启停）===
 
-  startServer(port?: number): http.Server {
+  startServer(port?: number): http.Server | null {
     if (this.server) return this.server;
     const expressApp = createApp(this.config, this);
-    this.server = expressApp.listen(port ?? this.config.defaultPort);
+    const p = port ?? this.config.defaultPort;
+    const server = expressApp.listen(p);
+
+    server.on("error", (err: NodeJS.ErrnoException) => {
+      if (err.code === "EADDRINUSE") {
+        console.error(`Port ${p} is already in use. Web dashboard not started.`);
+        this.server = null;
+        this.serverPort = null;
+      } else {
+        throw err;
+      }
+    });
+
+    server.on("listening", () => {
+      process.stderr.write(`Web dashboard: http://localhost:${p}\n`);
+    });
+
+    this.server = server;
+    this.serverPort = p;
     return this.server;
+  }
+
+  stopServer(): void {
+    if (!this.server) return;
+    this.server.close();
+    this.server = null;
+    this.serverPort = null;
+  }
+
+  getServerPort(): number | null {
+    return this.serverPort;
   }
 
   startStatusPolling(): void {
@@ -328,7 +388,26 @@ export class LoomerApp {
           this.statusDetector.getStatus(agent.name);
         }
       }
+      // 全终态且无 REVIEW/CONFLICTED → 自动关闭 web
+      this._autoStopWebIfDone();
     }, 5000);
+  }
+
+  private _autoStopWebIfDone(): void {
+    if (!this.server) return;
+    const agents = this.state.getAllAgents();
+    const needsHuman = agents.some(
+      (a) => a.status === "REVIEW" || a.status === "CONFLICTED",
+    );
+    const hasActive = agents.some(
+      (a) =>
+        a.status === "RUNNING" ||
+        a.status === "PENDING" ||
+        a.status === "DONE",
+    );
+    if (!needsHuman && !hasActive) {
+      this.stopServer();
+    }
   }
 
   shutdown(): void {
@@ -336,9 +415,10 @@ export class LoomerApp {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
     }
-    if (this.server) {
-      this.server.close();
-      this.server = null;
+    this.stopServer();
+    // 杀所有子进程
+    for (const name of this.processManager.list()) {
+      this.processManager.stop(name);
     }
   }
 
@@ -348,39 +428,40 @@ export class LoomerApp {
     // git add -A（agent 可能不 commit）
     execSync("git add -A", { cwd: worktreePath, encoding: "utf-8" });
 
-    // 检查是否有变更
+    // 检查是否有变更（用 status --porcelain 而非 diff --cached，因为 agent 可能已自行 commit）
+    let hasChanges = false;
     try {
-      execSync("git diff --cached --quiet", {
+      const statusOutput = execSync("git status --porcelain", {
         cwd: worktreePath,
         encoding: "utf-8",
-      });
-      return; // 无变更，跳过 commit
+      }).trim();
+      hasChanges = statusOutput.length > 0;
     } catch {
-      // diff --cached --quiet exit ≠0 表示有变更
+      hasChanges = true; // status 失败时保守假设有变更
     }
+    if (!hasChanges) return; // 真正无变更，跳过
 
-    // auto-commit
+    // auto-commit（在 agent 分支上）
     const safeName = name.replace(/[^a-zA-Z0-9_-]/g, "_");
     execSync(`git commit -m "feat: ${safeName} auto-commit"`, {
       cwd: worktreePath,
       encoding: "utf-8",
     });
 
-    // merge 到主分支
+    // merge 到主分支 — 在主仓库中执行
     try {
       const baseBranch = this.config.baseBranch || "master";
-      execSync(`git checkout ${baseBranch}`, {
-        cwd: worktreePath,
+      execSync(`git merge ${name}`, {
+        cwd: this.repoPath,
         encoding: "utf-8",
       });
-      execSync(`git merge ${name}`, { cwd: worktreePath, encoding: "utf-8" });
     } catch {
       // merge 冲突 → 尝试自动解决
-      const resolved = this._autoResolveConflicts(worktreePath);
+      const resolved = this._autoResolveConflicts(this.repoPath);
       if (!resolved) {
         try {
           execSync("git merge --abort", {
-            cwd: worktreePath,
+            cwd: this.repoPath,
             encoding: "utf-8",
             stdio: ["pipe", "pipe", "pipe"],
           });
@@ -391,7 +472,7 @@ export class LoomerApp {
         let conflictFiles: string[] = [];
         try {
           const output = execSync("git diff --name-only --diff-filter=U", {
-            cwd: worktreePath,
+            cwd: this.repoPath,
             encoding: "utf-8",
           }).trim();
           conflictFiles = output ? output.split("\n").filter(Boolean) : [];
@@ -403,12 +484,12 @@ export class LoomerApp {
     }
   }
 
-  _autoResolveConflicts(worktreePath: string): boolean {
+  _autoResolveConflicts(mergeDir: string): boolean {
     // 识别冲突文件
     let conflictFiles: string[] = [];
     try {
       const output = execSync("git diff --name-only --diff-filter=U", {
-        cwd: worktreePath,
+        cwd: mergeDir,
         encoding: "utf-8",
       }).trim();
       conflictFiles = output ? output.split("\n").filter(Boolean) : [];
@@ -420,10 +501,10 @@ export class LoomerApp {
 
     // 逐文件按类型分派
     for (const file of conflictFiles) {
-      const filePath = `${worktreePath}/${file}`;
+      const filePath = `${mergeDir}/${file}`;
       try {
         const content = execSync(`cat "${filePath}"`, {
-          cwd: worktreePath,
+          cwd: mergeDir,
           encoding: "utf-8",
         });
         const { ours, theirs } = this._extractConflictSides(content);
@@ -443,7 +524,7 @@ export class LoomerApp {
 
     // git add 所有解决后的文件
     try {
-      execSync("git add -A", { cwd: worktreePath, encoding: "utf-8" });
+      execSync("git add -A", { cwd: mergeDir, encoding: "utf-8" });
     } catch {
       return false;
     }
@@ -451,7 +532,7 @@ export class LoomerApp {
     // 验证：tsc --noEmit
     try {
       execSync("npx tsc --noEmit", {
-        cwd: worktreePath,
+        cwd: mergeDir,
         encoding: "utf-8",
         stdio: ["pipe", "pipe", "pipe"],
       });
@@ -459,7 +540,7 @@ export class LoomerApp {
       // 验证失败 → 回退
       try {
         execSync("git merge --abort", {
-          cwd: worktreePath,
+          cwd: mergeDir,
           encoding: "utf-8",
           stdio: ["pipe", "pipe", "pipe"],
         });
@@ -472,7 +553,7 @@ export class LoomerApp {
     // 验证通过 → auto commit
     try {
       execSync('git commit -m "merge: auto-resolved conflicts"', {
-        cwd: worktreePath,
+        cwd: mergeDir,
         encoding: "utf-8",
       });
     } catch {
@@ -520,7 +601,7 @@ export class LoomerApp {
     };
   }
 
-  _createPr(name: string, worktreePath: string): string | null {
+  _createPr(name: string): string | null {
     if (!this.config.createPr) return null;
     try {
       const agent = this.state.getAgent(name);
@@ -528,7 +609,7 @@ export class LoomerApp {
       const title = prompt.slice(0, 70);
       const output = execSync(
         `gh pr create --title "${title}" --body "## Task: ${name}\n\n${prompt}" --head ${name}`,
-        { cwd: worktreePath, encoding: "utf-8" },
+        { cwd: this.repoPath, encoding: "utf-8" },
       ).trim();
       const prUrl = output.split("\n").pop() ?? null;
       if (prUrl) {

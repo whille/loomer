@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import type { LoomerConfig } from "./config.js";
+import type { RiskAssessmentData } from "./types/web.js";
 import type { AgentInfo, PlanProgress } from "./types/web.js";
 
 export class CliError extends Error {
@@ -100,7 +101,7 @@ export class LoomerClient {
     return this.handleResponse<T>(res);
   }
 
-  private async post<T>(urlPath: string, body?: unknown): Promise<T> {
+  async post<T>(urlPath: string, body?: unknown): Promise<T> {
     const init: RequestInit = { method: "POST" };
     if (body !== undefined) {
       init.headers = { "Content-Type": "application/json" };
@@ -196,7 +197,7 @@ function rowToAgentInfo(row: Record<string, unknown>): AgentInfo {
     pid: row.pid != null ? Number(row.pid) : undefined,
     exit_code: row.exit_code != null ? Number(row.exit_code) : undefined,
     risk_assessment: row.risk_assessment
-      ? (JSON.parse(String(row.risk_assessment)) as Record<string, unknown>)
+      ? (JSON.parse(String(row.risk_assessment)) as RiskAssessmentData)
       : undefined,
     last_output: row.last_output ? String(row.last_output) : undefined,
     pr_url: row.pr_url ? String(row.pr_url) : undefined,

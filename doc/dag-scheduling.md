@@ -1,7 +1,5 @@
 # Loomer PRD 驱动 DAG 调度
 
-> 来源：conductor-ui `conductor/core/plan.py` (450 行) + `conductor/core/app.py` run_plan()
-
 ## 流水线概览
 
 ```
@@ -61,7 +59,7 @@ TS-001 的 `depends: ["TS-002"]` → 找到 TS-002 对应的 US-002 → 该 US �
 
 - 提取 YAML frontmatter（`---` 之间）
 - 解析 YAML 子集 → PlanSpec
-- Python 手写 YAML 子集解析器 → Loomer 用 `js-yaml` 包替代
+- Loomer 使用 `js-yaml` 包解析
 
 ### fromPrdJson(path, maxConcurrent) — 从 prd.json 解析
 
@@ -171,14 +169,14 @@ for (const task of spec.tasks) {
 }
 ```
 
-conductor-ui Python 原版只统计 done/running/pending/crashed/conflicted，Loomer 增加 stale/review 覆盖所有状态。
+stale/review 为 Loomer 扩展状态，覆盖所有 9 种状态。
 
 ## transition callback 触发链
 
 ```
 StatusDetector 检测到 RUNNING→终态
   → _fire_transition(name, newStatus)
-    → ConductorApp._trigger_dep_resolution(name)
+    → LoomerApp._trigger_dep_resolution(name)
       → state.getPlan() 检查是否有活跃计划
         → PlanExecutor.onTaskDone(name)
           → 检查 PENDING 任务依赖
@@ -209,3 +207,9 @@ StatusDetector 检测到 RUNNING→终态
 **_planExecutor 重启兜底：** Express 重启后 _planExecutor 为 null，planStatus() 必须有 `_countPlanProgress()` 从 SQLite 重新统计进度的兜底路径。不能假设 executor 对象始终可用。
 
 **TS 编号用项目前缀：** 多计划共存时 TS-001 等通用编号会冲突。建议 prd.json 中 `taskSplit[].id` 使用项目缩写前缀（如 LMR-001），避免跨计划 ID 冲突。PlanExecutor 不强制，但 /prd skill 推荐此惯例。
+
+**prompt 必须包含 acceptance criteria：** 非交互模式下 agent 无法获得足够上下文，会进入 AskUserQuestion 等待（无人回答后直接结束，exit_code=0 但没写代码）。fromPrdJson() 必须将 userStory.acceptanceCriteria 全部注入 prompt，并附加"不要提问，直接实现"指令。
+
+**依赖任务启动前必须 rebase：** 依赖任务（如 TS-002 依赖 TS-001）的 worktree 基于旧 master 创建，上游任务完成后 master 已有新代码。start() 中创建 worktree 后必须 `git rebase <baseBranch>` 获取最新代码。rebase 失败时中止（让 agent 从干净状态开始），不阻塞启动。
+
+**WorkspaceManager.create() 必须幂等：** runPlan() 预创建所有 worktree 后 start() 也调用 create()，双重调用不能崩溃。分支已存在时不带 -b，worktree 已存在时直接返回，目录残留时清理后重建。

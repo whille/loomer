@@ -1,7 +1,5 @@
 # Loomer 风险分级审查门禁
 
-> 来源：conductor-ui `conductor/core/safety.py` (270 行) + `conductor/core/app.py` done() (478 行)
-
 ## 设计原则
 
 **人只看 HIGH** — 低风险改动自动 merge，高风险进 REVIEW 等待人工审查。
@@ -50,13 +48,13 @@ autoMergeRules: {
   ├── 2. state.updateAgent(name, { risk_assessment })
   │
   ├── 3. _mergeAgent(name, worktree_path)
-  │     ├── git add -A（worktree 中提交未暂存改动）
-  │     ├── git diff --cached --quiet（检查是否有变更）
+  │     ├── git add -A（worktree 中暂存未提交改动）
+  │     ├── git status --porcelain（检查是否有变更，不用 diff --cached）
   │     ├── git commit -m "feat: {name} auto-commit"（如有变更）
-  │     ├── git merge {name}（合并到主分支）
+  │     ├── git merge {name}（在主仓库 repoPath 中执行，不在 worktree 中！）
   │     └── 失败时：
   │         ├── CONFLICT → status=CONFLICTED + 保留 worktree
-  │         └── 其他错误 → 抛 ConductorError
+  │         └── 其他错误 → 抛 LoomerError
   │
   ├── 4. process.stop(name) — 终止 agent 进程
   │
@@ -97,6 +95,10 @@ _createPr(name: string, worktreePath: string): string | null
 ## Dogfooding 教训
 
 **worktree 必须在终态后清理：** 早期实现中 worktree 在 agent 终态后未清理，`git worktree list` 越来越长。修复：done()/accept()/reject() 成功后自动 `workspace.remove()`。CONFLICTED 和 REVIEW 状态保留 worktree。
+
+**merge 必须在主仓库目录执行：** git worktree 中 `git checkout master && git merge <name>` 不会影响主仓库的 master 分支，worktree 清理后代码丢失。merge 必须在 `repoPath` 中执行。
+
+**"无变更"判断必须用 git status：** `git diff --cached --quiet` 在 agent 已自行 commit 时误判为无变更，导致跳过 merge、代码丢失。必须用 `git status --porcelain` 判断。
 
 ## diff 范围
 

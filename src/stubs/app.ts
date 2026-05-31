@@ -160,6 +160,18 @@ export function createStubApp(): StubApp {
     planDag(): DagData | null {
       return planData.dag;
     },
+
+    startServer(_port?: number): null {
+      return null;
+    },
+
+    stopServer(): void {},
+
+    getServerPort(): null {
+      return null;
+    },
+
+    shutdown(): void {},
   };
 
   return stub;
