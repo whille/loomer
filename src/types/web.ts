@@ -17,6 +17,17 @@ export interface LoomerConfig {
   };
 }
 
+export interface RiskSignalData {
+  name: string;
+  level: "LOW" | "HIGH";
+  detail: string;
+}
+
+export interface RiskAssessmentData {
+  level: "LOW" | "HIGH";
+  signals: RiskSignalData[];
+}
+
 export interface AgentInfo {
   name: string;
   status: string;
@@ -26,7 +37,7 @@ export interface AgentInfo {
   started_at?: number;
   pid?: number | null;
   exit_code?: number | null;
-  risk_assessment?: Record<string, unknown> | null;
+  risk_assessment?: RiskAssessmentData | null;
   last_output?: string;
   pr_url?: string | null;
   archived?: boolean;

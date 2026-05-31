@@ -26,24 +26,22 @@
   const $diffTitle = document.getElementById("diff-modal-title");
   const $diffBody = document.getElementById("diff-modal-body");
   const $diffClose = document.getElementById("diff-modal-close");
+  const $riskModal = document.getElementById("risk-modal");
+  const $riskTitle = document.getElementById("risk-modal-title");
+  const $riskBody = document.getElementById("risk-modal-body");
+  const $riskClose = document.getElementById("risk-modal-close");
 
   // --- Action buttons per status ---
   const ACTIONS = {
     PENDING: [],
     RUNNING: [{ action: "kill", label: "Kill", cls: "btn-danger" }],
-    DONE: [{ action: "done", label: "Done", cls: "btn-success" }],
-    CRASHED: [
-      { action: "retry", label: "Retry", cls: "btn-warning" },
-      { action: "kill", label: "Kill", cls: "btn-danger" },
-    ],
+    DONE: [],
+    CRASHED: [],
     CONFLICTED: [
-      { action: "retry", label: "Retry", cls: "btn-warning" },
-      { action: "kill", label: "Kill", cls: "btn-danger" },
+      { action: "retry", label: "Resolve", cls: "btn-warning" },
+      { action: "kill", label: "Discard", cls: "btn-danger", query: "?clean=1" },
     ],
-    STALE: [
-      { action: "retry", label: "Retry", cls: "btn-warning" },
-      { action: "kill", label: "Kill", cls: "btn-danger" },
-    ],
+    STALE: [],
     REVIEW: [
       { action: "accept", label: "Accept", cls: "btn-success" },
       { action: "reject", label: "Reject", cls: "btn-danger" },
@@ -87,10 +85,13 @@
       tdName.innerHTML = '<span class="agent-name">' + esc(agent.name) + "</span>";
       tr.appendChild(tdName);
 
-      // status badge
+      // status badge + risk level for REVIEW
       const tdStatus = document.createElement("td");
-      tdStatus.innerHTML =
-        '<span class="badge badge-' + esc(agent.status) + '">' + esc(agent.status) + "</span>";
+      let statusHtml = '<span class="badge badge-' + esc(agent.status) + '">' + esc(agent.status) + "</span>";
+      if (agent.status === "REVIEW" && agent.risk_assessment) {
+        statusHtml += ' <span class="badge badge-risk-' + esc(agent.risk_assessment.level) + '">' + esc(agent.risk_assessment.level) + '</span>';
+      }
+      tdStatus.innerHTML = statusHtml;
       tr.appendChild(tdStatus);
 
       // branch
@@ -113,7 +114,7 @@
         const btn = document.createElement("button");
         btn.className = "btn btn-icon " + b.cls;
         btn.textContent = b.label;
-        btn.addEventListener("click", () => handleAction(agent.name, b.action, btn));
+        btn.addEventListener("click", () => handleAction(agent.name, b.action, btn, b.query));
         tdActions.appendChild(btn);
       }
       // log + diff buttons for all agents
@@ -128,6 +129,15 @@
       diffBtn.textContent = "Diff";
       diffBtn.addEventListener("click", () => showDiff(agent.name));
       tdActions.appendChild(diffBtn);
+
+      // risk button for REVIEW agents
+      if (agent.status === "REVIEW") {
+        const riskBtn = document.createElement("button");
+        riskBtn.className = "btn btn-icon";
+        riskBtn.textContent = "Risk";
+        riskBtn.addEventListener("click", () => showRisk(agent.name));
+        tdActions.appendChild(riskBtn);
+      }
 
       tr.appendChild(tdActions);
       $tbody.appendChild(tr);
@@ -179,6 +189,34 @@
       });
   }
 
+  // --- Risk Assessment modal ---
+  function showRisk(name) {
+    const agent = agentMap[name];
+    const ra = agent && agent.risk_assessment;
+    $riskTitle.textContent = "Risk Assessment: " + name;
+
+    if (!ra) {
+      $riskBody.textContent = "No risk assessment available.";
+    } else {
+      let html = '<div class="risk-overall">';
+      html += '<span class="badge badge-risk-' + esc(ra.level) + '">' + esc(ra.level) + ' RISK</span>';
+      html += "</div>";
+      html += '<table class="risk-signal-table">';
+      html += "<thead><tr><th>Signal</th><th>Level</th><th>Detail</th></tr></thead>";
+      html += "<tbody>";
+      for (const sig of ra.signals) {
+        html += "<tr>";
+        html += "<td>" + esc(sig.name) + "</td>";
+        html += '<td><span class="badge badge-risk-' + esc(sig.level) + '">' + esc(sig.level) + "</span></td>";
+        html += "<td>" + esc(sig.detail) + "</td>";
+        html += "</tr>";
+      }
+      html += "</tbody></table>";
+      $riskBody.innerHTML = html;
+    }
+    $riskModal.classList.add("active");
+  }
+
   // --- Modal close ---
   function closeModal(overlay) {
     overlay.classList.remove("active");
@@ -186,11 +224,15 @@
 
   $logClose.addEventListener("click", () => closeModal($logModal));
   $diffClose.addEventListener("click", () => closeModal($diffModal));
+  $riskClose.addEventListener("click", () => closeModal($riskModal));
   $logModal.addEventListener("click", (e) => {
     if (e.target === $logModal) closeModal($logModal);
   });
   $diffModal.addEventListener("click", (e) => {
     if (e.target === $diffModal) closeModal($diffModal);
+  });
+  $riskModal.addEventListener("click", (e) => {
+    if (e.target === $riskModal) closeModal($riskModal);
   });
 
   // --- Start form ---
@@ -326,15 +368,17 @@
     sse.addEventListener("status", (e) => {
       try {
         const changed = JSON.parse(e.data);
+        let needsFetch = false;
         for (const [name, status] of Object.entries(changed)) {
           if (agentMap[name]) {
             agentMap[name].status = status;
           } else {
-            // new agent, fetch full data
             agentMap[name] = { name, status };
           }
+          if (status === "REVIEW") needsFetch = true;
         }
-        renderAgents();
+        if (needsFetch) fetchAgents();
+        else renderAgents();
       } catch { /* ignore parse errors */ }
     });
   }

@@ -256,6 +256,46 @@ describe("createApp", () => {
     });
   });
 
+  describe("GET /api/status — risk_assessment", () => {
+    it("includes risk_assessment for REVIEW agents", async () => {
+      stubApp.agents.set("review-agent", {
+        name: "review-agent",
+        status: "REVIEW",
+        archived: false,
+        risk_assessment: {
+          level: "HIGH",
+          signals: [
+            { name: "file_count", level: "HIGH", detail: "7 files changed (threshold: 5)" },
+            { name: "line_count", level: "LOW", detail: "150 lines changed (threshold: 200)" },
+            { name: "new_files", level: "HIGH", detail: "new files added" },
+            { name: "public_modules", level: "LOW", detail: "no public module changes" },
+            { name: "conflict", level: "LOW", detail: "no conflict" },
+            { name: "test", level: "HIGH", detail: "no test files modified" },
+          ],
+        },
+      });
+
+      const res = await request(app).get("/api/status");
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveLength(1);
+      expect(res.body[0].risk_assessment).toBeDefined();
+      expect(res.body[0].risk_assessment.level).toBe("HIGH");
+      expect(res.body[0].risk_assessment.signals).toHaveLength(6);
+    });
+
+    it("returns null risk_assessment for non-REVIEW agents", async () => {
+      stubApp.agents.set("running-agent", {
+        name: "running-agent",
+        status: "RUNNING",
+        archived: false,
+      });
+
+      const res = await request(app).get("/api/status");
+      expect(res.status).toBe(200);
+      expect(res.body[0].risk_assessment).toBeUndefined();
+    });
+  });
+
   describe("POST /api/done/:name", () => {
     it("returns {ok: true} on success", async () => {
       stubApp.agents.set("test-agent", {
