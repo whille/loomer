@@ -216,6 +216,9 @@ body {
 .badge-ACCEPTED { background: var(--c-accepted); }
 .badge-REJECTED { background: var(--c-rejected); }
 
+.badge-risk-LOW  { background: var(--c-accepted); }
+.badge-risk-HIGH { background: var(--c-crashed); }
+
 /* === Empty State === */
 .empty-state {
   text-align: center;
@@ -347,6 +350,34 @@ body {
 }
 
 .plan-form input:focus { outline: none; border-color: var(--c-running); }
+
+/* === Risk Assessment === */
+.risk-overall {
+  margin-bottom: 12px;
+}
+
+.risk-signal-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 12px;
+}
+
+.risk-signal-table th {
+  text-align: left;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border);
+}
+
+.risk-signal-table td {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
 
 /* === Responsive === */
 @media (max-width: 768px) {

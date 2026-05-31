@@ -4,12 +4,25 @@ import type {
   PlanProgress,
   DagData,
   PlanResult,
+  RiskAssessmentData,
 } from "../types/web.js";
 import {
   AgentNotFoundError,
   InvalidNameError,
   PlanAlreadyActiveError,
 } from "../errors.js";
+
+const SAMPLE_RISK_ASSESSMENT: RiskAssessmentData = {
+  level: "HIGH",
+  signals: [
+    { name: "file_count", level: "HIGH", detail: "7 files changed (threshold: 5)" },
+    { name: "line_count", level: "LOW", detail: "150 lines changed (threshold: 200)" },
+    { name: "new_files", level: "HIGH", detail: "new files added" },
+    { name: "public_modules", level: "LOW", detail: "no public module changes" },
+    { name: "conflict", level: "LOW", detail: "no conflict" },
+    { name: "test", level: "HIGH", detail: "no test files modified" },
+  ],
+};
 
 export interface StubApp extends LoomerAppLike {
   agents: Map<string, AgentInfo>;
