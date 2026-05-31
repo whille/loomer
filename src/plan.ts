@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import yaml from "js-yaml";
 import { DAGValidationError, PlanFormatError } from "./errors.js";
-import { Status } from "./status.js";
+import type { LoomerAppLike } from "./types/web.js";
+import type { PlanProgress } from "./types/web.js";
 
 // === 类型定义 ===
 
@@ -17,293 +18,221 @@ export interface PlanSpec {
   tasks: TaskSpec[];
 }
 
-export interface IPlanContext {
-  registerAgent(
-    name: string,
-    prompt: string,
-    dependsOn: string[],
-    plan: string,
-  ): void;
-  launchAgent(name: string): void;
-  rejectAgent(name: string): void;
-  getAgentStatus(name: string): string | null;
-  getRunningCount(): number;
+// === PlanParser（函数导出，避免 noStaticOnlyClass）===
+
+function fromData(data: Record<string, unknown>): PlanSpec {
+  const rawTasks = (data.tasks as Array<Record<string, unknown>>) ?? [];
+  return {
+    name: (data.name as string) ?? "unnamed",
+    maxConcurrent: (data.maxConcurrent as number) ?? 5,
+    tasks: rawTasks.map((t) => ({
+      id: t.id as string,
+      prompt: (t.prompt as string) ?? "",
+      dependsOn: (t.dependsOn as string[]) ?? [],
+    })),
+  };
 }
 
-// === PlanParser ===
-
-export const PlanParser = {
-  parse(path: string): PlanSpec {
+export function parsePlan(path: string): PlanSpec {
+  try {
     const content = fs.readFileSync(path, "utf-8");
-    const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-    if (!match) {
-      throw new PlanFormatError("No YAML frontmatter found in plan file");
-    }
+    const match = content.match(/^---\n([\s\S]*?)\n---/);
+    if (!match) throw new PlanFormatError("No YAML frontmatter found");
+    const data = yaml.load(match[1]) as Record<string, unknown>;
+    return fromData(data);
+  } catch (err) {
+    if (err instanceof PlanFormatError || err instanceof DAGValidationError)
+      throw err;
+    throw new PlanFormatError(`Failed to parse plan.md: ${err}`);
+  }
+}
 
-    let parsed: Record<string, unknown> | null;
-    try {
-      parsed = yaml.load(match[1]) as Record<string, unknown> | null;
-    } catch (e) {
-      throw new PlanFormatError(
-        `Invalid YAML in plan file: ${(e as Error).message}`,
-      );
-    }
-    if (typeof parsed !== "object" || parsed === null) {
-      throw new PlanFormatError("Invalid YAML frontmatter: expected object");
-    }
+export function fromPrdJson(prdPath: string, maxConcurrent?: number): PlanSpec {
+  try {
+    const raw = fs.readFileSync(prdPath, "utf-8");
+    const prd = JSON.parse(raw) as Record<string, unknown>;
+    const userStories =
+      (prd.userStories as Array<Record<string, string>>) ?? [];
+    const storyMap = new Map(userStories.map((us) => [us.id, us]));
+    const taskSplit = (prd.taskSplit as Array<Record<string, unknown>>) ?? [];
 
-    const name = parsed.name;
-    if (typeof name !== "string" || name.length === 0) {
-      throw new PlanFormatError(
-        "Missing or invalid 'name' in plan frontmatter",
-      );
-    }
-
-    const maxConcurrent =
-      typeof parsed.maxConcurrent === "number" ? parsed.maxConcurrent : 5;
-
-    const tasksArr = parsed.tasks;
-    if (!Array.isArray(tasksArr)) {
-      throw new PlanFormatError(
-        "Missing or invalid 'tasks' in plan frontmatter",
-      );
-    }
-
-    const tasks: TaskSpec[] = tasksArr.map((t: unknown, i: number) => {
-      if (typeof t !== "object" || t === null || Array.isArray(t)) {
-        throw new PlanFormatError(`Task at index ${i}: expected object`);
-      }
-      const task = t as Record<string, unknown>;
-      if (typeof task?.id !== "string" || task.id.length === 0) {
-        throw new PlanFormatError(
-          `Task at index ${i}: missing or invalid 'id'`,
-        );
-      }
-      if (typeof task?.prompt !== "string") {
-        throw new PlanFormatError(
-          `Task '${task.id}': missing or invalid 'prompt'`,
-        );
-      }
+    const tasks: TaskSpec[] = taskSplit.map((ts) => {
+      const storyId = ts.userStory as string;
+      const story = storyMap.get(storyId);
+      const prompt =
+        story?.description || story?.title || `Task ${ts.id as string}`;
       return {
-        id: task.id,
-        prompt: task.prompt,
-        dependsOn: Array.isArray(task.dependsOn)
-          ? (task.dependsOn as string[])
-          : [],
-      };
-    });
-
-    return { name, maxConcurrent, tasks };
-  },
-
-  fromPrdJson(path: string, maxConcurrent?: number): PlanSpec {
-    const content = fs.readFileSync(path, "utf-8");
-    let prd: Record<string, unknown>;
-    try {
-      prd = JSON.parse(content) as Record<string, unknown>;
-    } catch (e) {
-      throw new PlanFormatError(
-        `Invalid JSON in prd.json: ${(e as Error).message}`,
-      );
-    }
-
-    const name = prd.project;
-    if (typeof name !== "string" || name.length === 0) {
-      throw new PlanFormatError("Missing or invalid 'project' in prd.json");
-    }
-
-    const storyMap = new Map<string, { description: string; title: string }>();
-    if (Array.isArray(prd.userStories)) {
-      for (const s of prd.userStories as Record<string, unknown>[]) {
-        if (typeof s.id === "string") {
-          storyMap.set(s.id, {
-            description: typeof s.description === "string" ? s.description : "",
-            title: typeof s.title === "string" ? s.title : "",
-          });
-        }
-      }
-    }
-
-    const tasksArr = prd.taskSplit;
-    if (!Array.isArray(tasksArr)) {
-      throw new PlanFormatError("Missing or invalid 'taskSplit' in prd.json");
-    }
-
-    const tasks: TaskSpec[] = tasksArr.map((t: unknown, i: number) => {
-      const task = t as Record<string, unknown>;
-      if (typeof task?.id !== "string" || task.id.length === 0) {
-        throw new PlanFormatError(
-          `Task at index ${i}: missing or invalid 'id'`,
-        );
-      }
-
-      let prompt = typeof task.title === "string" ? task.title : "";
-      if (typeof task.userStory === "string") {
-        const story = storyMap.get(task.userStory);
-        if (story && story.description.length > 0) {
-          prompt = story.description;
-        }
-      }
-
-      return {
-        id: task.id,
+        id: ts.id as string,
         prompt,
-        dependsOn: Array.isArray(task.depends)
-          ? (task.depends as string[])
-          : [],
+        dependsOn: (ts.depends as string[]) ?? [],
       };
     });
 
     return {
-      name,
+      name: (prd.project as string) ?? "unnamed",
       maxConcurrent: maxConcurrent ?? 5,
       tasks,
     };
-  },
-};
+  } catch (err) {
+    if (err instanceof PlanFormatError || err instanceof DAGValidationError)
+      throw err;
+    throw new PlanFormatError(`Failed to parse prd.json: ${err}`);
+  }
+}
 
-// === DAGValidator ===
+// 兼容 api-spec 的 class 接口
+export const PlanParser = { parse: parsePlan, fromPrdJson };
 
-export const DAGValidator = {
-  validate(spec: PlanSpec): void {
-    const tasks = spec.tasks;
+// === DAGValidator（函数导出）===
 
-    // Rule 1: ID 合法
-    for (const task of tasks) {
-      if (!/^[a-zA-Z0-9_-]+$/.test(task.id)) {
-        throw new PlanFormatError(
-          `Invalid task ID '${task.id}': must match ^[a-zA-Z0-9_-]+$`,
+const VALID_ID = /^[a-zA-Z0-9_-]+$/;
+
+export function validateDag(spec: PlanSpec): void {
+  const ids = new Set<string>();
+
+  // 规则 1: ID 合法性
+  for (const task of spec.tasks) {
+    if (!VALID_ID.test(task.id) || task.id.length > 64) {
+      throw new DAGValidationError(
+        `Invalid task ID: "${task.id}" (must match /^[a-zA-Z0-9_-]+$/, max 64 chars)`,
+      );
+    }
+  }
+
+  // 规则 2: 无重复
+  for (const task of spec.tasks) {
+    if (ids.has(task.id)) {
+      throw new DAGValidationError(`Duplicate task ID: "${task.id}"`);
+    }
+    ids.add(task.id);
+  }
+
+  // 规则 3: 无缺失引用
+  for (const task of spec.tasks) {
+    for (const dep of task.dependsOn) {
+      if (!ids.has(dep)) {
+        throw new DAGValidationError(
+          `Missing dependency: "${dep}" referenced by "${task.id}"`,
         );
       }
-      if (task.id.length > 64) {
-        throw new PlanFormatError(
-          `Invalid task ID '${task.id}': must be ≤ 64 characters`,
-        );
-      }
     }
+  }
 
-    // Rule 2: 无重复 ID
-    const seen = new Set<string>();
-    for (const task of tasks) {
-      if (seen.has(task.id)) {
-        throw new PlanFormatError(`Duplicate task ID: '${task.id}'`);
-      }
-      seen.add(task.id);
+  // 规则 4: 无环（Kahn 算法拓扑排序）
+  const inDegree = new Map<string, number>();
+  const dependents = new Map<string, string[]>();
+
+  for (const task of spec.tasks) {
+    inDegree.set(task.id, task.dependsOn.length);
+    dependents.set(task.id, []);
+  }
+
+  for (const task of spec.tasks) {
+    for (const dep of task.dependsOn) {
+      dependents.get(dep)?.push(task.id);
     }
+  }
 
-    // Rule 3: 无缺失引用
-    for (const task of tasks) {
-      for (const dep of task.dependsOn) {
-        if (!seen.has(dep)) {
-          throw new PlanFormatError(
-            `Task '${task.id}' depends on unknown task '${dep}'`,
-          );
-        }
-      }
+  const queue: string[] = [];
+  for (const [id, deg] of inDegree) {
+    if (deg === 0) queue.push(id);
+  }
+
+  let sortedCount = 0;
+  while (queue.length > 0) {
+    const node = queue.shift();
+    if (node === undefined) break;
+    sortedCount++;
+    for (const dependent of dependents.get(node) ?? []) {
+      const newDeg = (inDegree.get(dependent) ?? 0) - 1;
+      inDegree.set(dependent, newDeg);
+      if (newDeg === 0) queue.push(dependent);
     }
+  }
 
-    // Rule 4: 无环（Kahn 算法）
-    const inDegree = new Map<string, number>();
-    const adj = new Map<string, string[]>();
+  if (sortedCount < spec.tasks.length) {
+    throw new DAGValidationError("Dependency graph contains a cycle");
+  }
+}
 
-    for (const task of tasks) {
-      inDegree.set(task.id, task.dependsOn.length);
-      adj.set(task.id, []);
-    }
-
-    for (const task of tasks) {
-      for (const dep of task.dependsOn) {
-        adj.get(dep)?.push(task.id);
-      }
-    }
-
-    const queue: string[] = [];
-    for (const [id, deg] of inDegree) {
-      if (deg === 0) queue.push(id);
-    }
-
-    let processed = 0;
-    while (queue.length > 0) {
-      const current = queue.shift();
-      if (current === undefined) break;
-      processed++;
-      const dependents = adj.get(current) ?? [];
-      for (const dependent of dependents) {
-        const prevDeg = inDegree.get(dependent);
-        if (prevDeg === undefined) continue;
-        const newDeg = prevDeg - 1;
-        inDegree.set(dependent, newDeg);
-        if (newDeg === 0) {
-          queue.push(dependent);
-        }
-      }
-    }
-
-    if (processed < tasks.length) {
-      throw new DAGValidationError("DAG contains a cycle");
-    }
-  },
-};
+export const DAGValidator = { validate: validateDag };
 
 // === PlanExecutor ===
 
-const TERMINAL_STATUSES = new Set<string>([
-  Status.DONE,
-  Status.ACCEPTED,
-  Status.REJECTED,
-  Status.CRASHED,
-  Status.CONFLICTED,
-  Status.STALE,
-]);
-
 export class PlanExecutor {
-  private readonly ctx: IPlanContext;
+  private readonly app: LoomerAppLike;
   private readonly spec: PlanSpec;
-  private readonly taskIds: string[];
+  private readonly taskStatus: Map<string, string> = new Map();
 
-  constructor(ctx: IPlanContext, spec: PlanSpec) {
-    this.ctx = ctx;
+  constructor(app: LoomerAppLike, spec: PlanSpec) {
+    this.app = app;
     this.spec = spec;
-    this.taskIds = spec.tasks.map((t) => t.id);
   }
 
-  registerTasks(): string[] {
+  registerTasks(): void {
     for (const task of this.spec.tasks) {
-      this.ctx.registerAgent(
-        task.id,
-        task.prompt,
-        task.dependsOn,
-        this.spec.name,
-      );
+      this.taskStatus.set(task.id, "PENDING");
     }
-    return this._checkAndStartPending();
   }
 
-  onTaskDone(_taskId: string): string[] {
-    return this._checkAndStartPending();
+  onTaskDone(taskId: string): string[] {
+    this.taskStatus.set(taskId, "DONE");
+
+    const started: string[] = [];
+
+    // 级联拒绝
+    for (const task of this.spec.tasks) {
+      if (this.taskStatus.get(task.id) !== "PENDING") continue;
+      for (const dep of task.dependsOn) {
+        if (this.taskStatus.get(dep) === "REJECTED") {
+          this.taskStatus.set(task.id, "REJECTED");
+          break;
+        }
+      }
+    }
+
+    // 依赖解析
+    const runningCount = Array.from(this.taskStatus.values()).filter(
+      (s) => s === "RUNNING",
+    ).length;
+
+    for (const task of this.spec.tasks) {
+      if (this.taskStatus.get(task.id) !== "PENDING") continue;
+      if (runningCount + started.length >= this.spec.maxConcurrent) break;
+
+      const allDepsSatisfied = task.dependsOn.every((dep) => {
+        const status = this.taskStatus.get(dep);
+        return status === "DONE" || status === "ACCEPTED";
+      });
+
+      if (allDepsSatisfied) {
+        this.taskStatus.set(task.id, "RUNNING");
+        started.push(task.id);
+        this.app.start(task.id, task.prompt);
+      }
+    }
+
+    return started;
   }
 
   isPlanComplete(): boolean {
-    for (const id of this.taskIds) {
-      const status = this.ctx.getAgentStatus(id);
-      if (status === null || !TERMINAL_STATUSES.has(status)) {
+    for (const task of this.spec.tasks) {
+      const status = this.taskStatus.get(task.id);
+      if (
+        status !== "DONE" &&
+        status !== "ACCEPTED" &&
+        status !== "REJECTED" &&
+        status !== "CRASHED" &&
+        status !== "CONFLICTED" &&
+        status !== "STALE"
+      ) {
         return false;
       }
     }
     return true;
   }
 
-  getProgress(): {
-    plan: string;
-    total: number;
-    done: number;
-    running: number;
-    pending: number;
-    crashed: number;
-    conflicted: number;
-    stale: number;
-    review: number;
-  } {
+  getProgress(): PlanProgress {
     let done = 0;
     let running = 0;
     let pending = 0;
@@ -312,30 +241,30 @@ export class PlanExecutor {
     let stale = 0;
     let review = 0;
 
-    for (const id of this.taskIds) {
-      const status = this.ctx.getAgentStatus(id) ?? "PENDING";
+    for (const task of this.spec.tasks) {
+      const status = this.taskStatus.get(task.id) ?? "PENDING";
       switch (status) {
-        case Status.DONE:
-        case Status.ACCEPTED:
+        case "DONE":
+        case "ACCEPTED":
           done++;
           break;
-        case Status.RUNNING:
+        case "RUNNING":
           running++;
           break;
-        case Status.PENDING:
+        case "PENDING":
           pending++;
           break;
-        case Status.CRASHED:
+        case "CRASHED":
           crashed++;
           break;
-        case Status.CONFLICTED:
+        case "CONFLICTED":
           conflicted++;
           break;
-        case Status.STALE:
+        case "STALE":
           stale++;
           break;
-        case Status.REVIEW:
-        case Status.REJECTED:
+        case "REVIEW":
+        case "REJECTED":
           review++;
           break;
       }
@@ -343,7 +272,7 @@ export class PlanExecutor {
 
     return {
       plan: this.spec.name,
-      total: this.taskIds.length,
+      total: this.spec.tasks.length,
       done,
       running,
       pending,
@@ -352,52 +281,5 @@ export class PlanExecutor {
       stale,
       review,
     };
-  }
-
-  private _checkAndStartPending(_triggerTaskId?: string): string[] {
-    const started: string[] = [];
-    let changed = true;
-
-    // 固定点迭代：级联 REJECTED 可能多层级传播，需重复遍历直到无新变化
-    while (changed) {
-      changed = false;
-
-      for (const task of this.spec.tasks) {
-        const status = this.ctx.getAgentStatus(task.id);
-        if (status !== Status.PENDING) continue;
-
-        let anyRejected = false;
-        let allSatisfied = true;
-
-        for (const dep of task.dependsOn) {
-          const depStatus = this.ctx.getAgentStatus(dep);
-          if (depStatus === Status.REJECTED) {
-            anyRejected = true;
-            break;
-          }
-          if (depStatus !== Status.DONE && depStatus !== Status.ACCEPTED) {
-            allSatisfied = false;
-            break;
-          }
-        }
-
-        if (anyRejected) {
-          this.ctx.rejectAgent(task.id);
-          changed = true;
-          continue;
-        }
-
-        if (
-          allSatisfied &&
-          this.ctx.getRunningCount() < this.spec.maxConcurrent
-        ) {
-          this.ctx.launchAgent(task.id);
-          started.push(task.id);
-          changed = true;
-        }
-      }
-    }
-
-    return started;
   }
 }

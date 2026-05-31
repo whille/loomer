@@ -1,12 +1,12 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import type { LoomerConfig } from "./config.js";
 import { AgentNotFoundError } from "./errors.js";
+import type { IAgentData, IStateStore, Status } from "./status.js";
 
-// === 类型 ===
-
-export interface Agent {
+export interface AgentData {
   name: string;
   status: string;
   branch: string | null;
@@ -23,27 +23,15 @@ export interface Agent {
   plan: string | null;
 }
 
-export interface TaskSpec {
-  id: string;
-  prompt: string;
-  dependsOn: string[];
-}
-
 export interface PlanData {
   name: string;
   max_concurrent: number;
-  tasks: TaskSpec[];
+  tasks: Array<{ id: string; prompt: string; depends_on: string[] }>;
   created_at: number;
 }
 
-export interface State {
-  agents: Agent[];
-  plan: PlanData | null;
-}
-
-// === Schema ===
-
-const SCHEMA_SQL = `
+// SQL 创建语句
+const CREATE_AGENTS = `
 CREATE TABLE IF NOT EXISTS agents (
   name TEXT PRIMARY KEY,
   status TEXT NOT NULL DEFAULT 'PENDING',
@@ -59,47 +47,26 @@ CREATE TABLE IF NOT EXISTS agents (
   archived INTEGER NOT NULL DEFAULT 0,
   depends_on TEXT,
   plan TEXT
-);
+)`;
 
+const CREATE_PLANS = `
 CREATE TABLE IF NOT EXISTS plans (
   name TEXT PRIMARY KEY,
   max_concurrent INTEGER NOT NULL DEFAULT 5,
   tasks TEXT NOT NULL,
   created_at REAL NOT NULL
-);
-`;
+)`;
 
-// === 序列化辅助 ===
-
-function toArchivedInt(v: unknown): 0 | 1 {
-  return v === 1 || v === true ? 1 : 0;
+function repoDir(config: LoomerConfig, repoPath: string): string {
+  const hash = crypto
+    .createHash("sha256")
+    .update(repoPath)
+    .digest("hex")
+    .slice(0, 12);
+  return path.join(config.resolvedStateDir, hash);
 }
 
-function toJsonString(v: unknown): string | null {
-  if (v === null || v === undefined) return null;
-  if (typeof v === "string") return v;
-  try {
-    return JSON.stringify(v);
-  } catch {
-    return null;
-  }
-}
-
-function parseJson<T>(v: unknown, fallback: T): T {
-  if (v === null || v === undefined) return fallback;
-  if (typeof v === "string") {
-    try {
-      return JSON.parse(v) as T;
-    } catch {
-      return fallback;
-    }
-  }
-  return v as T;
-}
-
-// === 行 → Agent 转换（防御性处理缺失字段）===
-
-function rowToAgent(row: Record<string, unknown>): Agent {
+function rowToAgent(row: Record<string, unknown>): AgentData {
   return {
     name: row.name as string,
     status: (row.status as string) ?? "PENDING",
@@ -107,271 +74,245 @@ function rowToAgent(row: Record<string, unknown>): Agent {
     prompt: (row.prompt as string | null) ?? null,
     worktree: (row.worktree as string | null) ?? null,
     started_at: (row.started_at as number | null) ?? null,
-    pid: typeof row.pid === "number" ? row.pid : null,
-    exit_code: typeof row.exit_code === "number" ? row.exit_code : null,
-    risk_assessment: parseJson<Record<string, unknown> | null>(
-      row.risk_assessment,
-      null,
-    ),
+    pid: (row.pid as number | null) ?? null,
+    exit_code: (row.exit_code as number | null) ?? null,
+    risk_assessment: row.risk_assessment
+      ? (JSON.parse(row.risk_assessment as string) as Record<string, unknown>)
+      : null,
     last_output: (row.last_output as string | null) ?? null,
     pr_url: (row.pr_url as string | null) ?? null,
-    archived: row.archived === 1 || row.archived === true,
-    depends_on: parseJson<string[]>(row.depends_on, []),
+    archived: Boolean(row.archived),
+    depends_on: row.depends_on
+      ? (JSON.parse(row.depends_on as string) as string[])
+      : [],
     plan: (row.plan as string | null) ?? null,
   };
 }
 
-function rowToPlan(row: Record<string, unknown>): PlanData {
-  return {
-    name: row.name as string,
-    max_concurrent:
-      typeof row.max_concurrent === "number" ? row.max_concurrent : 5,
-    tasks: parseJson<TaskSpec[]>(row.tasks, []),
-    created_at:
-      typeof row.created_at === "number" ? row.created_at : 0,
-  };
-}
-
-// === repo 路径隔离 ===
-
-function repoHash(repoPath: string): string {
-  return crypto.createHash("sha256").update(repoPath).digest("hex").slice(0, 12);
-}
-
-// === StateStore ===
-
 export class StateStore {
-  readonly db: Database.Database;
+  private readonly db: Database.Database;
 
   constructor(config: LoomerConfig, repoPath: string) {
-    const stateDir = config.resolvedStateDir ?? config.stateDir;
-    const dbPath = path.join(stateDir, `${repoHash(repoPath)}.db`);
+    const dir = repoDir(config, repoPath);
+    fs.mkdirSync(dir, { recursive: true });
 
-    this.db = new Database(dbPath);
+    this.db = new Database(path.join(dir, "state.db"));
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("busy_timeout = 5000");
-    this.db.exec(SCHEMA_SQL);
+    this.db.exec(CREATE_AGENTS);
+    this.db.exec(CREATE_PLANS);
   }
 
-  // --- 核心方法 ---
-
-  load(): State {
-    const agents = this.db
-      .prepare("SELECT * FROM agents")
-      .all()
-      .map((r) => rowToAgent(r as Record<string, unknown>));
-
-    const planRow = this.db
-      .prepare("SELECT * FROM plans")
-      .get() as Record<string, unknown> | undefined;
-
-    return {
-      agents,
-      plan: planRow ? rowToPlan(planRow) : null,
-    };
+  close(): void {
+    this.db.close();
   }
 
-  /** Full state replacement. Use only for initial load or full restore;
-   *  for partial updates use updateAgent() to avoid lost-update races. */
-  save(state: State): void {
-    const txn = this.db.transaction(() => {
-      this.db.exec("DELETE FROM agents");
-      this.db.exec("DELETE FROM plans");
+  // --- Agent CRUD ---
 
-      const insertAgent = this.db.prepare(`
-        INSERT INTO agents (name, status, branch, prompt, worktree,
-          started_at, pid, exit_code, risk_assessment, last_output,
-          pr_url, archived, depends_on, plan)
-        VALUES (@name, @status, @branch, @prompt, @worktree,
-          @started_at, @pid, @exit_code, @risk_assessment, @last_output,
-          @pr_url, @archived, @depends_on, @plan)
-      `);
-
-      for (const a of state.agents) {
-        insertAgent.run({
-          name: a.name,
-          status: a.status,
-          branch: a.branch ?? null,
-          prompt: a.prompt ?? null,
-          worktree: a.worktree ?? null,
-          started_at: a.started_at ?? null,
-          pid: a.pid ?? null,
-          exit_code: a.exit_code ?? null,
-          risk_assessment: toJsonString(a.risk_assessment),
-          last_output: a.last_output ?? null,
-          pr_url: a.pr_url ?? null,
-          archived: toArchivedInt(a.archived),
-          depends_on: a.depends_on.length ? JSON.stringify(a.depends_on) : null,
-          plan: a.plan ?? null,
-        });
-      }
-
-      if (state.plan) {
-        this.db
-          .prepare(
-            `INSERT INTO plans (name, max_concurrent, tasks, created_at)
-             VALUES (@name, @max_concurrent, @tasks, @created_at)`,
-          )
-          .run({
-            name: state.plan.name,
-            max_concurrent: state.plan.max_concurrent,
-            tasks: JSON.stringify(state.plan.tasks),
-            created_at: state.plan.created_at,
-          });
-      }
-    });
-    txn();
-  }
-
-  updateAgent(name: string, fields: Record<string, unknown>): void {
-    if (fields.name !== undefined && fields.name !== name) {
-      throw new Error(
-        `Agent name mismatch: path param "${name}" vs fields.name "${fields.name as string}"`,
-      );
-    }
-
-    // 原子 upsert：INSERT on new, UPDATE on conflict
-    // 新字段用传入值，未传字段保留现有值（coalesce）
-    this.db
-      .prepare(
-        `INSERT INTO agents (name, status, branch, prompt, worktree,
-          started_at, pid, exit_code, risk_assessment, last_output,
-          pr_url, archived, depends_on, plan)
-        VALUES (@name, @status, @branch, @prompt, @worktree,
-          @started_at, @pid, @exit_code, @risk_assessment, @last_output,
-          @pr_url, @archived, @depends_on, @plan)
-        ON CONFLICT(name) DO UPDATE SET
-          status = coalesce(@status, agents.status),
-          branch = coalesce(@branch, agents.branch),
-          prompt = coalesce(@prompt, agents.prompt),
-          worktree = coalesce(@worktree, agents.worktree),
-          started_at = coalesce(@started_at, agents.started_at),
-          pid = CASE WHEN @pid IS NOT NULL THEN @pid ELSE agents.pid END,
-          exit_code = CASE WHEN @exit_code IS NOT NULL THEN @exit_code ELSE agents.exit_code END,
-          risk_assessment = coalesce(@risk_assessment, agents.risk_assessment),
-          last_output = coalesce(@last_output, agents.last_output),
-          pr_url = coalesce(@pr_url, agents.pr_url),
-          archived = CASE WHEN @archived_set = 1 THEN @archived ELSE agents.archived END,
-          depends_on = coalesce(@depends_on, agents.depends_on),
-          plan = coalesce(@plan, agents.plan)`,
-      )
-      .run({
-        name,
-        status: (fields.status as string) ?? null,
-        branch: (fields.branch as string) ?? null,
-        prompt: (fields.prompt as string) ?? null,
-        worktree: (fields.worktree as string) ?? null,
-        started_at: (fields.started_at as number) ?? null,
-        pid: (fields.pid as number) ?? null,
-        exit_code: (fields.exit_code as number) ?? null,
-        risk_assessment: toJsonString(fields.risk_assessment),
-        last_output: (fields.last_output as string) ?? null,
-        pr_url: (fields.pr_url as string) ?? null,
-        archived_set: fields.archived !== undefined ? 1 : 0,
-        archived: toArchivedInt(fields.archived),
-        depends_on: toJsonString(fields.depends_on),
-        plan: (fields.plan as string) ?? null,
-      });
-  }
-
-  updateAgentStatus(name: string, status: string): void {
-    const result = this.db
-      .prepare("UPDATE agents SET status = ? WHERE name = ?")
-      .run(status, name);
-    if (result.changes === 0) {
-      throw new AgentNotFoundError(`Agent not found: ${name}`);
-    }
-  }
-
-  removeAgent(name: string): void {
-    this.db.prepare("DELETE FROM agents WHERE name = ?").run(name);
-  }
-
-  getAgent(name: string): Agent | null {
+  getAgent(name: string): AgentData | null {
     const row = this.db
       .prepare("SELECT * FROM agents WHERE name = ?")
       .get(name) as Record<string, unknown> | undefined;
     return row ? rowToAgent(row) : null;
   }
 
-  getPlan(): PlanData | null {
-    const row = this.db
-      .prepare("SELECT * FROM plans")
-      .get() as Record<string, unknown> | undefined;
-    return row ? rowToPlan(row) : null;
+  updateAgent(name: string, fields: Record<string, unknown>): void {
+    const existing = this.getAgent(name);
+    if (existing) {
+      const merged: Record<string, unknown> = {
+        ...this.agentToRow(existing),
+        ...this.fieldsToRow(fields),
+        name,
+      };
+      this.db
+        .prepare(
+          "UPDATE agents SET status=?, branch=?, prompt=?, worktree=?, started_at=?, pid=?, exit_code=?, risk_assessment=?, last_output=?, pr_url=?, archived=?, depends_on=?, plan=? WHERE name=?",
+        )
+        .run(
+          merged.status as string,
+          merged.branch as string | null,
+          merged.prompt as string | null,
+          merged.worktree as string | null,
+          merged.started_at as number | null,
+          merged.pid as number | null,
+          merged.exit_code as number | null,
+          merged.risk_assessment as string | null,
+          merged.last_output as string | null,
+          merged.pr_url as string | null,
+          merged.archived as number,
+          merged.depends_on as string,
+          merged.plan as string | null,
+          name,
+        );
+    } else {
+      const row = this.fieldsToRow(fields);
+      this.db
+        .prepare(
+          "INSERT INTO agents (name, status, branch, prompt, worktree, started_at, pid, exit_code, risk_assessment, last_output, pr_url, archived, depends_on, plan) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .run(
+          name,
+          row.status ?? "PENDING",
+          row.branch ?? null,
+          row.prompt ?? null,
+          row.worktree ?? null,
+          row.started_at ?? null,
+          row.pid ?? null,
+          row.exit_code ?? null,
+          row.risk_assessment ?? null,
+          row.last_output ?? null,
+          row.pr_url ?? null,
+          row.archived ?? 0,
+          row.depends_on ?? "[]",
+          row.plan ?? null,
+        );
+    }
   }
 
-  setPlan(plan: PlanData): void {
-    this.db.exec("DELETE FROM plans");
+  updateAgentStatus(name: string, status: string): void {
+    const existing = this.getAgent(name);
+    if (!existing) throw new AgentNotFoundError(`Agent not found: ${name}`);
     this.db
-      .prepare(
-        `INSERT INTO plans (name, max_concurrent, tasks, created_at)
-         VALUES (@name, @max_concurrent, @tasks, @created_at)`,
-      )
-      .run({
-        name: plan.name,
-        max_concurrent: plan.max_concurrent,
-        tasks: JSON.stringify(plan.tasks),
-        created_at: plan.created_at,
-      });
+      .prepare("UPDATE agents SET status = ? WHERE name = ?")
+      .run(status, name);
   }
 
-  clearPlan(): void {
-    this.db.exec("DELETE FROM plans");
+  removeAgent(name: string): void {
+    this.db.prepare("DELETE FROM agents WHERE name = ?").run(name);
   }
 
-  getPendingAgents(): Agent[] {
-    return this.db
-      .prepare(
-        "SELECT * FROM agents WHERE status = 'PENDING' AND archived = 0",
-      )
-      .all()
-      .map((r) => rowToAgent(r as Record<string, unknown>));
+  // --- 查询 ---
+
+  getPendingAgents(): AgentData[] {
+    return this.getAllAgents().filter((a) => a.status === "PENDING");
   }
 
   getRunningCount(): number {
-    const row = this.db
-      .prepare(
-        "SELECT COUNT(*) as cnt FROM agents WHERE status = 'RUNNING' AND archived = 0",
-      )
-      .get() as Record<string, unknown>;
-    return (row.cnt as number) ?? 0;
+    return this.getAllAgents().filter((a) => a.status === "RUNNING").length;
+  }
+
+  getActiveAgents(): AgentData[] {
+    return this.getAllAgents().filter((a) => !a.archived);
+  }
+
+  getArchivedAgents(): AgentData[] {
+    return this.getAllAgents().filter((a) => a.archived);
+  }
+
+  getAllAgents(): AgentData[] {
+    const rows = this.db.prepare("SELECT * FROM agents").all() as Record<
+      string,
+      unknown
+    >[];
+    return rows.map(rowToAgent);
   }
 
   // --- Archive ---
 
   archiveAgent(name: string): void {
-    const result = this.db
-      .prepare("UPDATE agents SET archived = 1 WHERE name = ?")
-      .run(name);
-    if (result.changes === 0) {
-      throw new AgentNotFoundError(`Agent not found: ${name}`);
+    this.db.prepare("UPDATE agents SET archived = 1 WHERE name = ?").run(name);
+  }
+
+  // --- Plan ---
+
+  getPlan(): PlanData | null {
+    const row = this.db.prepare("SELECT * FROM plans LIMIT 1").get() as
+      | Record<string, unknown>
+      | undefined;
+    if (!row) return null;
+    return {
+      name: row.name as string,
+      max_concurrent: (row.max_concurrent as number) ?? 5,
+      tasks: JSON.parse(row.tasks as string) as PlanData["tasks"],
+      created_at: row.created_at as number,
+    };
+  }
+
+  setPlan(plan: PlanData): void {
+    this.db.prepare("DELETE FROM plans").run();
+    this.db
+      .prepare(
+        "INSERT INTO plans (name, max_concurrent, tasks, created_at) VALUES (?, ?, ?, ?)",
+      )
+      .run(
+        plan.name,
+        plan.max_concurrent,
+        JSON.stringify(plan.tasks),
+        plan.created_at,
+      );
+  }
+
+  clearPlan(): void {
+    this.db.prepare("DELETE FROM plans").run();
+  }
+
+  // --- IStateStore 适配器（供 StatusDetector 使用）---
+
+  asIStateStore(): IStateStore {
+    return {
+      getAgent: (name: string): IAgentData | null => {
+        const agent = this.getAgent(name);
+        if (!agent) return null;
+        return {
+          name: agent.name,
+          status: agent.status,
+          pid: agent.pid,
+          started_at: agent.started_at ?? 0,
+          exit_code: agent.exit_code,
+          worktree: agent.worktree,
+        };
+      },
+      updateAgentStatus: (name: string, status: Status): void => {
+        this.updateAgentStatus(name, status);
+      },
+    };
+  }
+
+  // --- 内部转换 ---
+
+  private agentToRow(agent: AgentData): Record<string, unknown> {
+    return {
+      status: agent.status,
+      branch: agent.branch ?? null,
+      prompt: agent.prompt ?? null,
+      worktree: agent.worktree ?? null,
+      started_at: agent.started_at ?? null,
+      pid: agent.pid ?? null,
+      exit_code: agent.exit_code ?? null,
+      risk_assessment: agent.risk_assessment
+        ? JSON.stringify(agent.risk_assessment)
+        : null,
+      last_output: agent.last_output ?? null,
+      pr_url: agent.pr_url ?? null,
+      archived: agent.archived ? 1 : 0,
+      depends_on: JSON.stringify(agent.depends_on ?? []),
+      plan: agent.plan ?? null,
+    };
+  }
+
+  private fieldsToRow(
+    fields: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const row: Record<string, unknown> = {};
+    if ("status" in fields) row.status = fields.status;
+    if ("branch" in fields) row.branch = fields.branch;
+    if ("prompt" in fields) row.prompt = fields.prompt;
+    if ("worktree" in fields) row.worktree = fields.worktree;
+    if ("started_at" in fields) row.started_at = fields.started_at;
+    if ("pid" in fields) row.pid = fields.pid;
+    if ("exit_code" in fields) row.exit_code = fields.exit_code;
+    if ("risk_assessment" in fields) {
+      row.risk_assessment =
+        fields.risk_assessment && typeof fields.risk_assessment === "object"
+          ? JSON.stringify(fields.risk_assessment)
+          : (fields.risk_assessment as string | null);
     }
-  }
-
-  getActiveAgents(): Agent[] {
-    return this.db
-      .prepare("SELECT * FROM agents WHERE archived = 0")
-      .all()
-      .map((r) => rowToAgent(r as Record<string, unknown>));
-  }
-
-  getArchivedAgents(): Agent[] {
-    return this.db
-      .prepare("SELECT * FROM agents WHERE archived = 1")
-      .all()
-      .map((r) => rowToAgent(r as Record<string, unknown>));
-  }
-
-  // --- 生命周期 ---
-
-  close(): void {
-    try {
-      this.db.close();
-    } catch (e) {
-      if (!(e instanceof Error && /already closed/i.test(e.message))) {
-        console.error("Unexpected error closing database:", e);
-      }
-    }
+    if ("last_output" in fields) row.last_output = fields.last_output;
+    if ("pr_url" in fields) row.pr_url = fields.pr_url;
+    if ("archived" in fields) row.archived = fields.archived ? 1 : 0;
+    if ("depends_on" in fields)
+      row.depends_on = JSON.stringify(fields.depends_on);
+    if ("plan" in fields) row.plan = fields.plan;
+    return row;
   }
 }

@@ -1,8 +1,5 @@
-import { execFileSync } from "node:child_process";
-import fs from "node:fs";
-import path from "node:path";
+import { execSync } from "node:child_process";
 import type { LoomerConfig } from "./config.js";
-import { SafetyChecks } from "./safety.js";
 
 export interface Workspace {
   name: string;
@@ -11,111 +8,94 @@ export interface Workspace {
 }
 
 export class WorkspaceManager {
-  private readonly config: LoomerConfig;
-  private readonly root: string;
+  private readonly repoPath: string;
 
-  constructor(config: LoomerConfig, root?: string) {
-    this.config = config;
-    this.root = fs.realpathSync(root ?? process.cwd());
+  constructor(_config: LoomerConfig, root?: string) {
+    this.repoPath = root ?? process.cwd();
   }
 
   create(name: string, baseBranch?: string): Workspace {
-    SafetyChecks.validateName(name);
-    const base = baseBranch ?? this._detectBaseBranch();
-    const wtPath = path.join(this.root, ".worktrees", name);
+    const branch = name;
+    const base = baseBranch ?? this.detectBaseBranch();
+    const worktreePath = `${this.repoPath}-${name}`;
 
-    execFileSync("git", ["worktree", "add", "-b", name, wtPath, base], {
-      cwd: this.root,
+    // 创建 worktree（同时创建分支）
+    execSync(`git worktree add -b ${branch} "${worktreePath}" ${base}`, {
+      cwd: this.repoPath,
       encoding: "utf-8",
     });
 
-    return { name, path: wtPath, branch: name };
+    return { name, path: worktreePath, branch };
   }
 
   remove(name: string): void {
-    const wtPath = path.join(this.root, ".worktrees", name);
-    if (!fs.existsSync(wtPath)) return;
-
+    const worktreePath = `${this.repoPath}-${name}`;
     try {
-      execFileSync("git", ["worktree", "remove", "--force", wtPath], {
-        cwd: this.root,
-        encoding: "utf-8",
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-    } catch (e) {
-      // remove --force 失败且目录仍存在 → 真正的错误
-      if (fs.existsSync(wtPath)) {
-        throw new Error(
-          `Failed to remove worktree at ${wtPath}: ${e instanceof Error ? e.message : String(e)}`,
-        );
-      }
-    }
-
-    try {
-      execFileSync("git", ["branch", "-D", name], {
-        cwd: this.root,
+      execSync(`git worktree remove "${worktreePath}" --force`, {
+        cwd: this.repoPath,
         encoding: "utf-8",
         stdio: ["pipe", "pipe", "pipe"],
       });
     } catch {
-      // 分支可能已被上游删除，不再存在则无碍
+      // worktree 不存在时不报错
+    }
+    try {
+      execSync(`git branch -D ${name}`, {
+        cwd: this.repoPath,
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    } catch {
+      // 分支不存在时不报错
     }
   }
 
   listAll(): Workspace[] {
-    const output = execFileSync("git", ["worktree", "list", "--porcelain"], {
-      cwd: this.root,
+    const output = execSync("git worktree list --porcelain", {
+      cwd: this.repoPath,
       encoding: "utf-8",
-    });
+    }).trim();
+    const entries: Workspace[] = [];
+    let currentPath = "";
+    let currentBranch = "";
 
-    const entries = output.trim().split("\n\n").filter(Boolean);
-    const result: Workspace[] = [];
-
-    for (const entry of entries) {
-      const lines = entry.split("\n");
-      const wtPath = lines
-        .find((l) => l.startsWith("worktree "))
-        ?.slice("worktree ".length);
-      const branch = lines
-        .find((l) => l.startsWith("branch "))
-        ?.slice("branch ".length);
-      if (!wtPath || wtPath === this.root) continue;
-      const name = path.basename(wtPath);
-      if (branch) {
-        result.push({ name, path: wtPath, branch: path.basename(branch) });
+    for (const line of output.split("\n")) {
+      if (line.startsWith("worktree ")) {
+        currentPath = line.slice("worktree ".length);
+      } else if (line.startsWith("branch refs/heads/")) {
+        currentBranch = line.slice("branch refs/heads/".length);
+        if (currentPath && currentBranch) {
+          entries.push({
+            name: currentBranch,
+            path: currentPath,
+            branch: currentBranch,
+          });
+        }
       }
     }
-
-    return result;
+    return entries;
   }
 
   exists(name: string): boolean {
-    return this.listAll().some((w) => w.name === name);
+    try {
+      const output = execSync(`git branch --list "${name}"`, {
+        cwd: this.repoPath,
+        encoding: "utf-8",
+      });
+      return output.trim().length > 0;
+    } catch {
+      return false;
+    }
   }
 
-  private _detectBaseBranch(): string {
-    if (this.config.baseBranch) return this.config.baseBranch;
-    for (const candidate of ["main", "master"]) {
-      try {
-        execFileSync("git", ["rev-parse", "--verify", candidate], {
-          cwd: this.root,
-          encoding: "utf-8",
-          stdio: ["pipe", "pipe", "pipe"],
-        });
-        return candidate;
-      } catch {
-        continue;
-      }
+  private detectBaseBranch(): string {
+    try {
+      return execSync("git rev-parse --abbrev-ref HEAD", {
+        cwd: this.repoPath,
+        encoding: "utf-8",
+      }).trim();
+    } catch {
+      return "master";
     }
-    const head = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
-      cwd: this.root,
-      encoding: "utf-8",
-    }).trim();
-    if (head === "HEAD") {
-      throw new Error(
-        "Cannot detect base branch: repository has no commits. Specify baseBranch explicitly.",
-      );
-    }
-    return head;
   }
 }
