@@ -87,6 +87,13 @@ export class ProcessManager {
     ];
 
     const env = { ...process.env };
+
+    // 限制 agent 子进程的 worker 并发数，防止 vitest/esbuild 等吃满资源
+    const workerLimit = Math.max(2, Math.floor((os.cpus().length || 4) / (this.config.maxConcurrent || 3)));
+    env.VITEST_POOL_MAX_WORKERS = String(workerLimit);
+    env.VITEST_MAX_THREADS = String(workerLimit);
+    env.ESBUILD_THREADS = String(Math.min(workerLimit, 4));
+    env.UV_THREADPOOL_SIZE = String(Math.min(workerLimit * 2, 16));
     const existingPath = env.PATH ?? "";
     const pathSet = new Set(existingPath.split(path.delimiter));
     const extraDirs = EXTRA_PATHS.filter((d) => !pathSet.has(d));
@@ -177,14 +184,17 @@ export class ProcessManager {
     return tracked.child.pid ?? null;
   }
 
-  getRecentOutput(name: string, lines = 50): string {
+  getRecentOutput(name: string): string {
     const tracked = this.processes.get(name);
     if (!tracked) return "";
     const allOutput = tracked.outputLines.join("");
     const parsed = ProcessManager.parseStreamJson(allOutput.split("\n"));
-    if (parsed) return parsed;
-    const allLines = allOutput.split("\n").filter(Boolean);
-    return allLines.slice(-lines).join("\n");
+    const result = parsed || allOutput;
+    const MAX_CHARS = 50000;
+    if (result.length > MAX_CHARS) {
+      return "...(truncated)\n" + result.slice(-MAX_CHARS);
+    }
+    return result;
   }
 
   hasExited(name: string): boolean {
@@ -216,6 +226,7 @@ export class ProcessManager {
           if (delta?.type === "text_delta") {
             textParts.push((delta.text as string) || "");
           }
+          // 跳过 tool_use/input_json_delta 等
         } else if (event.type === "result") {
           const result = event.result as
             | Array<Record<string, unknown>>
@@ -223,8 +234,10 @@ export class ProcessManager {
           for (const block of result ?? []) {
             if (block.type === "text")
               textParts.push((block.text as string) || "");
+            // 跳过 tool_use / tool_result 块
           }
         }
+        // 跳过 message_start, message_delta, content_block_start, content_block_stop 等控制事件
       } catch {
         // 非 JSON 行
       }

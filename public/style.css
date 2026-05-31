@@ -274,15 +274,26 @@ body {
 .modal-close:hover { color: var(--text); }
 
 .modal-body {
-  padding: 16px;
-  overflow-y: auto;
-  font-family: 'SF Mono', Menlo, monospace;
-  font-size: 13px;
-  white-space: pre-wrap;
-  word-break: break-all;
-  color: var(--text-dim);
   flex: 1;
+  padding: 12px;
+  overflow-y: auto;
+  max-height: 70vh;
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+  background: var(--bg);
+  border-radius: var(--radius);
 }
+
+.modal-body h2, .modal-body h3, .modal-body h4 { margin: 12px 0 6px; color: var(--text); }
+.modal-body strong { color: #f0f4f8; }
+.modal-body code { background: var(--surface); padding: 1px 4px; border-radius: 3px; font-size: 12px; }
+.modal-body pre { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; overflow-x: auto; margin: 8px 0; }
+.modal-body pre code { background: none; padding: 0; }
+.modal-body li { margin-left: 20px; }
 
 /* === DAG Panel === */
 .dag-panel {
@@ -384,7 +395,7 @@ body {
 /* 按状态着色节点 */
 #dag-svg .dag-node.done rect      { fill: rgba(6, 182, 212, 0.13); stroke: var(--c-done); }
 #dag-svg .dag-node.running rect   { fill: rgba(59, 130, 246, 0.13); stroke: var(--c-running); }
-#dag-svg .dag-node.pending rect   { fill: var(--bg); stroke: var(--c-pending); }
+#dag-svg .dag-node.pending rect   { fill: rgba(156, 163, 175, 0.15); stroke: var(--c-pending); }
 #dag-svg .dag-node.crashed rect   { fill: rgba(239, 68, 68, 0.13); stroke: var(--c-crashed); }
 #dag-svg .dag-node.conflicted rect { fill: rgba(249, 115, 22, 0.13); stroke: var(--c-conflicted); }
 #dag-svg .dag-node.stale rect     { fill: rgba(234, 179, 8, 0.13); stroke: var(--c-stale); }
@@ -449,4 +460,16 @@ body {
   .agent-table { font-size: 13px; }
   .agent-prompt { max-width: 150px; }
   .modal { width: 95vw; }
+}
+
+/* === Stat Chips (DAG panel) === */
+.stat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: var(--surface);
+  font-size: 12px;
+  color: var(--text-dim);
 }

@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import type { AutoMergeRules } from "./config.js";
 import { InvalidNameError } from "./errors.js";
 
@@ -48,7 +48,7 @@ export class SafetyChecks {
   }
 
   checkGitClean(): boolean {
-    const output = execSync("git status --porcelain", {
+    const output = execFileSync("git", ["status", "--porcelain"], {
       cwd: this.repoPath,
       encoding: "utf-8",
     });
@@ -57,10 +57,9 @@ export class SafetyChecks {
 
   checkGitignore(dir: string): boolean {
     try {
-      execSync(`git check-ignore -q "${dir}"`, {
+      execFileSync("git", ["check-ignore", "-q", dir], {
         cwd: this.repoPath,
         encoding: "utf-8",
-        stdio: ["pipe", "pipe", "pipe"],
       });
       return true;
     } catch {
@@ -69,7 +68,7 @@ export class SafetyChecks {
   }
 
   checkBranchExists(name: string): boolean {
-    const output = execSync(`git branch --list "${name}"`, {
+    const output = execFileSync("git", ["branch", "--list", name], {
       cwd: this.repoPath,
       encoding: "utf-8",
     });
@@ -118,8 +117,22 @@ export class SafetyChecks {
 
     const base = baseBranch || "master";
 
+    // 检测是否为新项目（base 分支 commit 数 ≤ 3 视为新项目）
+    let isNewProject = false;
+    try {
+      const commitCount = execFileSync(
+        "git", ["rev-list", "--count", base],
+        { cwd: worktreePath, encoding: "utf-8" },
+      ).trim();
+      const count = Number.parseInt(commitCount, 10);
+      isNewProject = !Number.isNaN(count) && count > 0 && count <= 3;
+    } catch {
+      // git 命令失败时保守处理：视为非新项目，不降级风险信号
+      isNewProject = false;
+    }
+
     // 信号 1+3+4+6 共享 name-status 输出
-    const diffNameStatus = execSync(`git diff --name-status ${base}...HEAD`, {
+    const diffNameStatus = execFileSync("git", ["diff", "--name-status", `${base}...HEAD`], {
       cwd: worktreePath,
       encoding: "utf-8",
     }).trim();
@@ -127,16 +140,17 @@ export class SafetyChecks {
       ? diffNameStatus.split("\n").filter(Boolean)
       : [];
 
-    // 信号 1: file_count
+    // 信号 1: file_count（新项目一律 LOW）
     const files = statusLines
       .map((l) => l.split("\t").pop() || "")
       .filter(Boolean);
     const fileCount = files.length;
-    const fileCountLevel =
-      fileCount > rules.maxFiles ? RiskLevel.HIGH : RiskLevel.LOW;
+    const fileCountLevel = isNewProject
+      ? RiskLevel.LOW
+      : fileCount > rules.maxFiles ? RiskLevel.HIGH : RiskLevel.LOW;
 
-    // 信号 2: line_count
-    const shortstat = execSync(`git diff --shortstat ${base}...HEAD`, {
+    // 信号 2: line_count（新项目一律 LOW）
+    const shortstat = execFileSync("git", ["diff", "--shortstat", `${base}...HEAD`], {
       cwd: worktreePath,
       encoding: "utf-8",
     }).trim();
@@ -145,42 +159,41 @@ export class SafetyChecks {
     const insertions = insMatch ? Number.parseInt(insMatch[1], 10) : 0;
     const deletions = delMatch ? Number.parseInt(delMatch[1], 10) : 0;
     const totalLines = insertions + deletions;
-    const lineCountLevel =
-      totalLines > rules.maxLines ? RiskLevel.HIGH : RiskLevel.LOW;
+    const lineCountLevel = isNewProject
+      ? RiskLevel.LOW
+      : totalLines > rules.maxLines ? RiskLevel.HIGH : RiskLevel.LOW;
 
-    // 信号 3: new_files
+    // 信号 3: new_files（新项目一律 LOW）
     const hasNewFiles = statusLines.some((l) => l.startsWith("A\t"));
-    const newFilesLevel = hasNewFiles ? RiskLevel.HIGH : RiskLevel.LOW;
+    const newFilesLevel = hasNewFiles && !isNewProject ? RiskLevel.HIGH : RiskLevel.LOW;
 
-    // 信号 4: public_modules（精确路径段匹配）
+    // 信号 4: public_modules（新项目一律 LOW）
     const hasPublicModules = files.some((filepath) => {
       const parts = filepath.split("/");
       return parts.slice(0, -1).some((p) => ["lib", "core", "src"].includes(p));
     });
-    const publicModulesLevel = hasPublicModules
+    const publicModulesLevel = hasPublicModules && !isNewProject
       ? RiskLevel.HIGH
       : RiskLevel.LOW;
 
     // 信号 5: conflict（试合并 + 回滚）
     let hasConflict = false;
     try {
-      const mergeOutput = execSync(`git merge --no-commit --no-ff ${base}`, {
+      execFileSync("git", ["merge", "--no-commit", "--no-ff", base], {
         cwd: worktreePath,
         encoding: "utf-8",
-        stdio: ["pipe", "pipe", "pipe"],
       });
       // 合并成功，检查是否有未合并路径（冲突）
-      const statusOutput = execSync("git ls-files --unmerged", {
+      const statusOutput = execFileSync("git", ["ls-files", "--unmerged"], {
         cwd: worktreePath,
         encoding: "utf-8",
       });
       hasConflict = statusOutput.trim().length > 0;
       // 清理：回滚试合并
       try {
-        execSync("git merge --abort", {
+        execFileSync("git", ["merge", "--abort"], {
           cwd: worktreePath,
           encoding: "utf-8",
-          stdio: ["pipe", "pipe", "pipe"],
         });
       } catch {
         // "Already up to date" 时无 MERGE_HEAD 可 abort，属正常情况
@@ -189,10 +202,9 @@ export class SafetyChecks {
       // 合并命令失败（通常意味着冲突）
       hasConflict = true;
       try {
-        execSync("git merge --abort", {
+        execFileSync("git", ["merge", "--abort"], {
           cwd: worktreePath,
           encoding: "utf-8",
-          stdio: ["pipe", "pipe", "pipe"],
         });
       } catch {
         // 回滚失败，尽力清理

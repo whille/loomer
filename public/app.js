@@ -105,7 +105,7 @@
       // prompt
       const tdPrompt = document.createElement("td");
       tdPrompt.innerHTML =
-        '<span class="agent-prompt" title="' + esc(agent.prompt || "") + '">' + esc(agent.prompt || "-") + "</span>";
+        '<span class="agent-prompt" title="' + esc(agent.prompt || "") + '">' + esc((agent.prompt || "-").slice(0, 120)) + (agent.prompt && agent.prompt.length > 120 ? "…" : "") + "</span>";
       tr.appendChild(tdPrompt);
 
       // actions
@@ -160,20 +160,81 @@
       });
   }
 
+  // --- Simple Markdown renderer (XSS-safe: escapes input first) ---
+  function renderMd(text) {
+    if (!text) return "";
+    var s = esc(text);
+    // code blocks (```...```) — unescape content inside <pre> since we already escaped
+    s = s.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code) {
+      return "<pre><code>" + code + "</code></pre>";
+    });
+    // inline code
+    s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
+    // bold
+    s = s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+    // italic
+    s = s.replace(/\*(.+?)\*/g, "<em>$1</em>");
+    // headers
+    s = s.replace(/^### (.+)$/gm, "<h4>$1</h4>");
+    s = s.replace(/^## (.+)$/gm, "<h3>$1</h3>");
+    s = s.replace(/^# (.+)$/gm, "<h2>$1</h2>");
+    // bullet lists
+    s = s.replace(/^[-*] (.+)$/gm, "<li>$1</li>");
+    // numbered lists
+    s = s.replace(/^\d+\. (.+)$/gm, "<li>$1</li>");
+    // paragraphs (double newline)
+    s = s.replace(/\n\n/g, "</p><p>");
+    // single newline
+    s = s.replace(/\n/g, "<br>");
+    return s;
+  }
+
   // --- Log modal ---
+  let logSse = null;
+  let logName = null;
+
   function showLog(name) {
+    logName = name;
     $logTitle.textContent = "Log: " + name;
-    $logBody.textContent = "Loading...";
+    $logBody.innerHTML = "<p>Loading...</p>";
     $logModal.classList.add("active");
 
-    fetch("/api/log/" + encodeURIComponent(name) + "?lines=100")
+    // Initial load
+    fetch("/api/log/" + encodeURIComponent(name))
       .then((r) => r.json())
       .then((data) => {
-        $logBody.textContent = data.log || "(empty)";
+        $logBody.innerHTML = renderMd(data.log || "(empty log)");
+        $logBody.scrollTop = $logBody.scrollHeight;
       })
       .catch((err) => {
-        $logBody.textContent = "Error: " + err.message;
+        $logBody.innerHTML = "<p>Error: " + esc(err.message) + "</p>";
       });
+
+    // Subscribe to log SSE for incremental updates
+    if (logSse) logSse.close();
+    logSse = new EventSource("/api/log/" + encodeURIComponent(name) + "/stream");
+    logSse.onmessage = function(e) {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.text) {
+          const div = document.createElement("div");
+          div.className = "log-chunk";
+          div.innerHTML = renderMd(data.text);
+          $logBody.appendChild(div);
+          $logBody.scrollTop = $logBody.scrollHeight;
+        }
+        if (data.done) {
+          logSse.close();
+          logSse = null;
+        }
+      } catch {}
+    };
+  }
+
+  function closeLogModal() {
+    $logModal.classList.remove("active");
+    if (logSse) { logSse.close(); logSse = null; }
+    logName = null;
   }
 
   // --- Diff modal ---
@@ -225,7 +286,7 @@
     overlay.classList.remove("active");
   }
 
-  $logClose.addEventListener("click", () => closeModal($logModal));
+  $logClose.addEventListener("click", closeLogModal);
   $diffClose.addEventListener("click", () => closeModal($diffModal));
   $riskClose.addEventListener("click", () => closeModal($riskModal));
   $logModal.addEventListener("click", (e) => {
@@ -330,8 +391,8 @@
         const $stats = document.getElementById("dag-stats");
         if ($stats) {
           $stats.innerHTML = STAT_DOTS.map(d =>
-            '<span><i class="stat-dot ' + d.cls + '"></i>' + (progress[d.key] || 0) + " " + d.label + "</span>"
-          ).join("");
+            '<span class="stat-chip"><i class="stat-dot ' + d.cls + '"></i>' + (progress[d.key] || 0) + " " + d.label + "</span>"
+          ).join("  ");
         }
 
         // load DAG nodes+edges

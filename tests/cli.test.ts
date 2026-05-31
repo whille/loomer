@@ -173,7 +173,7 @@ describe("CLI program", () => {
     expect(rejectCall!.args).toEqual(["my-agent"]);
   });
 
-  it("log calls client.log() with name and lines", async () => {
+  it("log calls client.log() with name", async () => {
     const program = createProgram(() => mockClient);
     const output = captureOutput();
 
@@ -183,12 +183,10 @@ describe("CLI program", () => {
         "loomer",
         "log",
         "my-agent",
-        "--lines",
-        "100",
       ]);
       const logCall = mockClient._calls.find((c) => c.method === "log");
       expect(logCall).toBeDefined();
-      expect(logCall!.args).toEqual(["my-agent", 100]);
+      expect(logCall!.args).toEqual(["my-agent"]);
       expect(output.logs.join("\n")).toContain("log output");
     } finally {
       output.restore();

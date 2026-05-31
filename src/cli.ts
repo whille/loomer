@@ -161,11 +161,10 @@ export function createProgram(
   program
     .command("log")
     .argument("<name>", "Agent name")
-    .option("--lines <n>", "Number of lines", "50")
-    .action(async (name: string, opts: { lines: string }) => {
+    .action(async (name: string) => {
       const client = makeClient(loadConfig());
       try {
-        const text = await client.log(name, Number.parseInt(opts.lines, 10));
+        const text = await client.log(name);
         console.log(text);
       } catch (err) {
         handleCliError(err);
@@ -199,7 +198,9 @@ export function createProgram(
 
       try {
         const { LoomerApp } = await import("./app.js");
-        const loomerApp = LoomerApp.create(config);
+        // 从 prd.json 路径推导目标仓库目录（prd.json 的父目录）
+        const repoPath = path.dirname(path.dirname(prdPath));
+        const loomerApp = LoomerApp.create(config, repoPath);
 
         const result = loomerApp.runPlan(undefined, prdPath, opts.port);
         console.log(

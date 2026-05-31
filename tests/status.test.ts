@@ -613,13 +613,13 @@ describe("StatusDetector", () => {
       expect(detector.getRecentOutput("test-agent")).toBe("output line");
     });
 
-    it("默认传递 lines=50", () => {
+    it("仅传递 name 参数", () => {
       const mockGetRecentOutput = vi.fn(() => "");
       proc = createMockProcess({ getRecentOutput: mockGetRecentOutput });
       detector = new StatusDetector(state, proc, 30);
 
       detector.getRecentOutput("test-agent");
-      expect(mockGetRecentOutput).toHaveBeenCalledWith("test-agent", 50);
+      expect(mockGetRecentOutput).toHaveBeenCalledWith("test-agent");
     });
   });
 

@@ -263,7 +263,7 @@ describe("LoomerClient", () => {
   });
 
   describe("log (HTTP)", () => {
-    it("fetches from /api/log/:name?lines=N when server is running", async () => {
+    it("fetches from /api/log/:name when server is running", async () => {
       fetchSpy.mockResolvedValueOnce(new Response("[]", { status: 200 }));
       fetchSpy.mockResolvedValueOnce(
         new Response(JSON.stringify({ log: "line1\nline2" }), {
@@ -272,11 +272,11 @@ describe("LoomerClient", () => {
         }),
       );
 
-      const result = await client.log("my-agent", 20);
+      const result = await client.log("my-agent");
       expect(result).toBe("line1\nline2");
       expect(fetchSpy).toHaveBeenNthCalledWith(
         2,
-        "http://localhost:3000/api/log/my-agent?lines=20",
+        "http://localhost:3000/api/log/my-agent",
       );
     });
   });
@@ -411,10 +411,8 @@ describe("LoomerClient offline fallback", () => {
       db.close();
 
       const client = new LoomerClient(config);
-      const log = await client.log("my-agent", 10);
-      const lines = log.split("\n");
-      expect(lines).toHaveLength(10);
-      expect(lines[0]).toBe("line 91");
+      const log = await client.log("my-agent");
+      expect(log).toContain("line 1");
     });
 
     skipNoNative("returns empty string when agent not found", async () => {
@@ -429,13 +427,13 @@ describe("LoomerClient offline fallback", () => {
       db.close();
 
       const client = new LoomerClient(config);
-      const log = await client.log("nonexistent", 50);
+      const log = await client.log("nonexistent");
       expect(log).toBe("");
     });
 
     it("returns empty string when DB does not exist", async () => {
       const client = new LoomerClient(config);
-      const log = await client.log("any-agent", 50);
+      const log = await client.log("any-agent");
       expect(log).toBe("");
     });
   });

@@ -115,9 +115,9 @@ export function createStubApp(): StubApp {
       return Array.from(agents.values());
     },
 
-    log(name: string, lines?: number): string {
+    log(name: string): string {
       getOrThrow(name);
-      return `log output for ${name} (last ${lines ?? 50} lines)`;
+      return `log output for ${name}`;
     },
 
     diff(name: string, mode?: string): string {

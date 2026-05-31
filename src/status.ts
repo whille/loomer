@@ -47,7 +47,7 @@ export interface IStateStore {
 export interface IProcessManager {
   isAlive(name: string): boolean;
   getPid(name: string): number | null;
-  getRecentOutput(name: string, lines?: number): string;
+  getRecentOutput(name: string): string;
   hasExited(name: string): boolean;
   getExitCode(name: string): number | null;
 }
@@ -90,8 +90,8 @@ export class StatusDetector {
     return this._detectRunningStatus(name, agent);
   }
 
-  getRecentOutput(name: string, lines = 50): string {
-    return this.process.getRecentOutput(name, lines);
+  getRecentOutput(name: string): string {
+    return this.process.getRecentOutput(name);
   }
 
   getDiff(name: string, mode: "stat" | "full" = "stat"): string {
@@ -147,7 +147,7 @@ export class StatusDetector {
     }
 
     // Step 7: 日志有内容 + 进程已退出
-    const output = this.process.getRecentOutput(name, 1);
+    const output = this.process.getRecentOutput(name);
     if (output.trim().length > 0 && !this.process.isAlive(name)) {
       return this._updateAndFire(name, Status.DONE);
     }

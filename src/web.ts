@@ -120,13 +120,58 @@ export function createApp(
   app.get("/api/log/:name", validateNameParam, (req, res, next) => {
     try {
       const name = req.params.name as string;
-      const rawLines = Number(req.query.lines) || 50;
-      const lines = Math.min(Math.max(Math.round(rawLines), 1), 10000);
-      const log = loomerApp!.log(name, lines);
+      const log = loomerApp!.log(name);
       res.json({ log });
     } catch (err) {
       next(err);
     }
+  });
+
+  // GET /api/log/:name/stream — SSE incremental log stream
+  const MAX_SSE_CLIENTS = 20;
+  const activeSseIntervals = new Set<ReturnType<typeof setInterval>>();
+
+  app.get("/api/log/:name/stream", validateNameParam, (req, res) => {
+    if (activeSseIntervals.size >= MAX_SSE_CLIENTS) {
+      res.status(429).json({ error: "TooManySSEConnections" });
+      return;
+    }
+    const name = req.params.name as string;
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    });
+
+    let lastLen = 0;
+    const interval = setInterval(() => {
+      try {
+        const fullLog = loomerApp!.log(name);
+        if (fullLog && fullLog.length > lastLen) {
+          const newChunk = fullLog.slice(lastLen);
+          lastLen = fullLog.length;
+          res.write(`data: ${JSON.stringify({ text: newChunk })}\n\n`);
+        }
+        // Check if agent is done
+        const agent = loomerApp!.status().find((a: { name: string; status: string }) => a.name === name);
+        if (agent && !["RUNNING", "PENDING"].includes(agent.status)) {
+          res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+          clearInterval(interval);
+          activeSseIntervals.delete(interval);
+          res.end();
+        }
+      } catch {
+        clearInterval(interval);
+        activeSseIntervals.delete(interval);
+        res.end();
+      }
+    }, 2000);
+
+    activeSseIntervals.add(interval);
+    req.on("close", () => {
+      clearInterval(interval);
+      activeSseIntervals.delete(interval);
+    });
   });
 
   // GET /api/diff/:name

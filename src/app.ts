@@ -244,8 +244,8 @@ export class LoomerApp {
     return this.state.getAllAgents().map(this.agentToInfo.bind(this));
   }
 
-  log(name: string, lines = 50): string {
-    return this.processManager.getRecentOutput(name, lines);
+  log(name: string): string {
+    return this.processManager.getRecentOutput(name);
   }
 
   diff(name: string, mode: "stat" | "full" = "stat"): string {

@@ -75,7 +75,7 @@ export interface LoomerAppLike {
   kill(name: string, clean?: boolean): void;
   retry(name: string): void;
   status(): AgentInfo[];
-  log(name: string, lines?: number): string;
+  log(name: string): string;
   diff(name: string, mode?: string): string;
   runPlan(path?: string, prdPath?: string, port?: number): PlanResult;
   planStatus(): PlanProgress | null;

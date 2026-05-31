@@ -34,6 +34,12 @@ function createTestRepo(): string {
   fs.writeFileSync(path.join(tmpDir, "README.md"), "# test")
   execSync("git add -A", { cwd: tmpDir })
   execSync("git commit -m 'initial'", { cwd: tmpDir, encoding: "utf-8" })
+  // 多加几个 commit 确保 isNewProject=false（commit count > 3）
+  for (let i = 0; i < 4; i++) {
+    fs.writeFileSync(path.join(tmpDir, `setup${i}.txt`), `setup ${i}`)
+    execSync("git add -A", { cwd: tmpDir })
+    execSync(`git commit -m 'setup ${i}'`, { cwd: tmpDir, encoding: "utf-8" })
+  }
   return tmpDir
 }
 

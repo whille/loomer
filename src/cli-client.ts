@@ -77,15 +77,14 @@ export class LoomerClient {
     return this.offlineStatus(all);
   }
 
-  async log(name: string, lines?: number): Promise<string> {
+  async log(name: string): Promise<string> {
     if (await this.isServerRunning()) {
-      const n = lines ?? 50;
       const data = await this.get<{ log: string }>(
-        `/api/log/${name}?lines=${n}`,
+        `/api/log/${name}`,
       );
       return data.log;
     }
-    return this.offlineLog(name, lines);
+    return this.offlineLog(name);
   }
 
   // --- Plan ---
@@ -166,7 +165,7 @@ export class LoomerClient {
     }
   }
 
-  private offlineLog(name: string, lines?: number): string {
+  private offlineLog(name: string): string {
     const db = this.openDb();
     if (!db) return "";
 
@@ -175,9 +174,12 @@ export class LoomerClient {
         .prepare("SELECT last_output FROM agents WHERE name = ?")
         .get(name) as { last_output: string | null } | undefined;
       if (!row?.last_output) return "";
-      const n = lines ?? 50;
-      const allLines = row.last_output.split("\n");
-      return allLines.slice(-n).join("\n");
+      const MAX_CHARS = 50000;
+      const output = row.last_output;
+      if (output.length > MAX_CHARS) {
+        return "...(truncated)\n" + output.slice(-MAX_CHARS);
+      }
+      return output;
     } catch {
       return "";
     } finally {

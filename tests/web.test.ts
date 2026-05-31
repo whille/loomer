@@ -207,15 +207,16 @@ describe("createApp", () => {
       expect(typeof res.body.log).toBe("string");
     });
 
-    it("passes lines query param", async () => {
+    it("returns log text regardless of query params", async () => {
       stubApp.agents.set("test-agent", {
         name: "test-agent",
         status: "RUNNING",
       });
 
-      const res = await request(app).get("/api/log/test-agent?lines=20");
+      const res = await request(app).get("/api/log/test-agent");
       expect(res.status).toBe(200);
-      expect(res.body.log).toContain("20");
+      expect(res.body.log).toBeDefined();
+      expect(typeof res.body.log).toBe("string");
     });
 
     it("returns 400 for missing agent", async () => {
