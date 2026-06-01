@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import fs from "node:fs";
 import path from "node:path";
 import { Command } from "commander";
 import {
@@ -193,10 +194,55 @@ export function createProgram(
     .requiredOption("--prd <path>", "Path to PRD JSON file")
     .option("--repo <path>", "Path to git repository (default: cwd)")
     .option("--port <number>", "Web server port", parseInt)
-    .action(async (opts: { prd: string; repo?: string; port?: number }) => {
+    .option("--clean", "Reset repo + state before starting")
+    .action(async (opts: { prd: string; repo?: string; port?: number; clean?: boolean }) => {
       const config = loadConfig();
       const prdPath = path.resolve(opts.prd);
       const repoPath = opts.repo ? path.resolve(opts.repo) : process.cwd();
+
+      if (opts.clean) {
+        // Kill web server on configured port
+        try {
+          const { execSync } = await import("node:child_process");
+          const port = opts.port ?? config.defaultPort;
+          execSync(`lsof -ti:${port} | xargs kill -9 2>/dev/null || true`, { stdio: "ignore" });
+        } catch { /* ignore */ }
+
+        // Abort in-progress merges, prune worktrees, delete agent branches
+        try {
+          const { execFileSync } = await import("node:child_process");
+          try { execFileSync("git", ["merge", "--abort"], { cwd: repoPath, stdio: "ignore" }); } catch { /* no merge in progress */ }
+          const wtList = execFileSync("git", ["worktree", "list"], { cwd: repoPath, encoding: "utf-8" });
+          for (const line of wtList.split("\n").slice(1)) {
+            const wtPath = line.split(/\s+/)[0];
+            if (wtPath && wtPath !== repoPath) {
+              try { execFileSync("git", ["worktree", "remove", wtPath, "--force"], { cwd: repoPath, stdio: "ignore" }); } catch { /* ignore */ }
+            }
+          }
+          execFileSync("git", ["worktree", "prune"], { cwd: repoPath, stdio: "ignore" });
+          // Delete agent branches (TS-*/ts-*)
+          const branches = execFileSync("git", ["branch", "--list", "TS-*", "ts-*"], { cwd: repoPath, encoding: "utf-8" });
+          for (const b of branches.split("\n").filter(Boolean)) {
+            const name = b.replace(/^\*?\s*/, "");
+            try { execFileSync("git", ["branch", "-D", name], { cwd: repoPath, stdio: "ignore" }); } catch { /* ignore */ }
+          }
+          // Reset repo to init commit
+          try {
+            const initHash = execFileSync("git", ["rev-list", "--max-parents=0", "HEAD"], { cwd: repoPath, encoding: "utf-8" }).trim();
+            execFileSync("git", ["checkout", "master"], { cwd: repoPath, stdio: "ignore" });
+            execFileSync("git", ["reset", "--hard", initHash], { cwd: repoPath, stdio: "ignore" });
+            execFileSync("git", ["clean", "-fdx"], { cwd: repoPath, stdio: "ignore" });
+          } catch { /* ignore */ }
+          // Remove stale state DB
+          const crypto = await import("node:crypto");
+          const hash = crypto.createHash("sha256").update(repoPath).digest("hex").slice(0, 12);
+          const stateDir = path.join(config.resolvedStateDir, hash);
+          try { fs.rmSync(stateDir, { recursive: true, force: true }); } catch { /* ignore */ }
+          console.log("Cleaned up previous run.");
+        } catch (err) {
+          console.warn("Partial cleanup failure (safe to continue):", err);
+        }
+      }
 
       try {
         const { LoomerApp } = await import("./app.js");
