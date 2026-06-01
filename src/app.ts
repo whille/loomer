@@ -295,11 +295,13 @@ export class LoomerApp {
     if (!inMerge) {
       const baseBranch = this.config.baseBranch || "master";
       try {
-        execFileSync("git", ["merge", "--no-ff", name, "-m", `Merge ${name} into ${baseBranch}`], {
+        const stdout = execFileSync("git", ["merge", "--no-ff", name, "-m", `Merge ${name} into ${baseBranch}`], {
           cwd: this.repoPath, encoding: "utf-8",
           stdio: ["pipe", "pipe", "pipe"],
         });
-        alreadyMerged = false;
+        if (stdout.includes("Already up to date")) {
+          alreadyMerged = true;
+        }
       } catch (err) {
         const stderr = (err as { stderr?: string })?.stderr ?? "";
         if (stderr.includes("Already up to date")) {
