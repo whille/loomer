@@ -273,7 +273,7 @@ export class LoomerApp {
     });
   }
 
-  /** 手动解决冲突后调用：git add + commit + validate → 继续后续流程 */
+  /** 手动解决冲突后调用：重新 merge → git add + commit + validate → 继续后续流程 */
   resolve(name: string): void {
     const agent = this.state.getAgent(name);
     if (!agent) throw new AgentNotFoundError(`Agent not found: ${name}`);
@@ -281,27 +281,65 @@ export class LoomerApp {
       throw new Error(`Agent ${name} is not CONFLICTED (current: ${agent.status})`);
     }
 
-    // 1. 检查是否还有未解决的冲突文件
+    // 1. 检查是否有正在进行的 merge（冲突文件存在）
+    let inMerge = false;
+    try {
+      const output = execFileSync("git", ["diff", "--name-only", "--diff-filter=U"], {
+        cwd: this.repoPath, encoding: "utf-8",
+      }).trim();
+      if (output) inMerge = true;
+    } catch { /* 不在 merge 中 */ }
+
+    // 2. 如果没有 merge in progress，重新发起 merge
+    let alreadyMerged = false;
+    if (!inMerge) {
+      const baseBranch = this.config.baseBranch || "master";
+      try {
+        execFileSync("git", ["merge", "--no-ff", name, "-m", `Merge ${name} into ${baseBranch}`], {
+          cwd: this.repoPath, encoding: "utf-8",
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+        alreadyMerged = false;
+      } catch (err) {
+        const stderr = (err as { stderr?: string })?.stderr ?? "";
+        if (stderr.includes("Already up to date")) {
+          alreadyMerged = true;
+        }
+        // merge 产生了冲突，继续下面的解决流程
+      }
+      // 重新检查冲突文件
+      try {
+        const output = execFileSync("git", ["diff", "--name-only", "--diff-filter=U"], {
+          cwd: this.repoPath, encoding: "utf-8",
+        }).trim();
+        if (output) inMerge = true;
+      } catch { /* 不在 merge 中 */ }
+    }
+
+    // 3. 检查冲突文件是否都已解决
     try {
       const output = execFileSync("git", ["diff", "--name-only", "--diff-filter=U"], {
         cwd: this.repoPath, encoding: "utf-8",
       }).trim();
       if (output) {
-        throw new MergeError("Unresolved conflicts remain", output.split("\n").filter(Boolean));
+        throw new MergeError("Unresolved conflicts remain: " + output, output.split("\n").filter(Boolean));
       }
     } catch (err) {
       if (err instanceof MergeError) throw err;
-      throw new MergeError("No merge in progress — cannot resolve");
+      // git diff 失败但不在 merge 中 → 可能已经 merge 过了
+      alreadyMerged = true;
     }
 
-    // 2. git add + commit
-    try {
-      execFileSync("git", ["add", "-A"], { cwd: this.repoPath, encoding: "utf-8" });
-      execFileSync("git", ["commit", "-m", "merge: manually resolved conflicts"], {
-        cwd: this.repoPath, encoding: "utf-8",
-      });
-    } catch {
-      throw new MergeError("Failed to commit resolved files");
+    // 4. git add + commit（如果 alreadyMerged 则跳过）
+    if (!alreadyMerged) {
+      try {
+        execFileSync("git", ["add", "-A"], { cwd: this.repoPath, encoding: "utf-8" });
+        execFileSync("git", ["commit", "-m", "merge: manually resolved conflicts"], {
+          cwd: this.repoPath, encoding: "utf-8",
+        });
+      } catch {
+        throw new MergeError("Failed to commit resolved files");
+      }
     }
 
     // 3. 可选验证
