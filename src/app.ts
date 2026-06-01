@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import type http from "node:http";
 import type { LoomerConfig } from "./config.js";
@@ -97,15 +97,14 @@ export class LoomerApp {
     // 依赖任务完成后主分支有新代码，rebase worktree 以获取最新
     const baseBranch = this.config.baseBranch || "master";
     try {
-      execSync(`git rebase ${baseBranch}`, {
+      execFileSync("git", ["rebase", baseBranch], {
         cwd: ws.path,
         encoding: "utf-8",
         stdio: ["pipe", "pipe", "pipe"],
       });
     } catch {
-      // rebase 冲突时中止，让 agent 从干净状态开始
       try {
-        execSync("git rebase --abort", {
+        execFileSync("git", ["rebase", "--abort"], {
           cwd: ws.path,
           encoding: "utf-8",
           stdio: ["pipe", "pipe", "pipe"],
@@ -423,12 +422,12 @@ export class LoomerApp {
 
   _mergeAgent(name: string, worktreePath: string): void {
     // git add -A（agent 可能不 commit）
-    execSync("git add -A", { cwd: worktreePath, encoding: "utf-8" });
+    execFileSync("git", ["add", "-A"], { cwd: worktreePath, encoding: "utf-8" });
 
     // 检查是否有变更（用 status --porcelain 而非 diff --cached，因为 agent 可能已自行 commit）
     let hasChanges = false;
     try {
-      const statusOutput = execSync("git status --porcelain", {
+      const statusOutput = execFileSync("git", ["status", "--porcelain"], {
         cwd: worktreePath,
         encoding: "utf-8",
       }).trim();
@@ -440,7 +439,7 @@ export class LoomerApp {
 
     // auto-commit（在 agent 分支上）
     const safeName = name.replace(/[^a-zA-Z0-9_-]/g, "_");
-    execSync(`git commit -m "feat: ${safeName} auto-commit"`, {
+    execFileSync("git", ["commit", "-m", `feat: ${safeName} auto-commit`], {
       cwd: worktreePath,
       encoding: "utf-8",
     });
@@ -448,7 +447,7 @@ export class LoomerApp {
     // merge 到主分支 — 在主仓库中执行
     try {
       const baseBranch = this.config.baseBranch || "master";
-      execSync(`git merge ${name}`, {
+      execFileSync("git", ["merge", name], {
         cwd: this.repoPath,
         encoding: "utf-8",
       });
@@ -457,7 +456,7 @@ export class LoomerApp {
       const resolved = this._autoResolveConflicts(this.repoPath);
       if (!resolved) {
         try {
-          execSync("git merge --abort", {
+          execFileSync("git", ["merge", "--abort"], {
             cwd: this.repoPath,
             encoding: "utf-8",
             stdio: ["pipe", "pipe", "pipe"],
@@ -468,7 +467,7 @@ export class LoomerApp {
         // 获取冲突文件列表
         let conflictFiles: string[] = [];
         try {
-          const output = execSync("git diff --name-only --diff-filter=U", {
+          const output = execFileSync("git", ["diff", "--name-only", "--diff-filter=U"], {
             cwd: this.repoPath,
             encoding: "utf-8",
           }).trim();
@@ -485,7 +484,7 @@ export class LoomerApp {
     // 识别冲突文件
     let conflictFiles: string[] = [];
     try {
-      const output = execSync("git diff --name-only --diff-filter=U", {
+      const output = execFileSync("git", ["diff", "--name-only", "--diff-filter=U"], {
         cwd: mergeDir,
         encoding: "utf-8",
       }).trim();
@@ -500,10 +499,7 @@ export class LoomerApp {
     for (const file of conflictFiles) {
       const filePath = `${mergeDir}/${file}`;
       try {
-        const content = execSync(`cat "${filePath}"`, {
-          cwd: mergeDir,
-          encoding: "utf-8",
-        });
+        const content = fs.readFileSync(filePath, "utf-8");
         const { ours, theirs } = this._extractConflictSides(content);
 
         if (ours === null || theirs === null) return false;
@@ -521,14 +517,14 @@ export class LoomerApp {
 
     // git add 所有解决后的文件
     try {
-      execSync("git add -A", { cwd: mergeDir, encoding: "utf-8" });
+      execFileSync("git", ["add", "-A"], { cwd: mergeDir, encoding: "utf-8" });
     } catch {
       return false;
     }
 
     // 验证：tsc --noEmit
     try {
-      execSync("npx tsc --noEmit", {
+      execFileSync("npx", ["tsc", "--noEmit"], {
         cwd: mergeDir,
         encoding: "utf-8",
         stdio: ["pipe", "pipe", "pipe"],
@@ -536,7 +532,7 @@ export class LoomerApp {
     } catch {
       // 验证失败 → 回退
       try {
-        execSync("git merge --abort", {
+        execFileSync("git", ["merge", "--abort"], {
           cwd: mergeDir,
           encoding: "utf-8",
           stdio: ["pipe", "pipe", "pipe"],
@@ -549,7 +545,7 @@ export class LoomerApp {
 
     // 验证通过 → auto commit
     try {
-      execSync('git commit -m "merge: auto-resolved conflicts"', {
+      execFileSync("git", ["commit", "-m", "merge: auto-resolved conflicts"], {
         cwd: mergeDir,
         encoding: "utf-8",
       });
@@ -604,8 +600,8 @@ export class LoomerApp {
       const agent = this.state.getAgent(name);
       const prompt = agent?.prompt ?? name;
       const title = prompt.slice(0, 70);
-      const output = execSync(
-        `gh pr create --title "${title}" --body "## Task: ${name}\n\n${prompt}" --head ${name}`,
+      const output = execFileSync(
+        "gh", ["pr", "create", "--title", title, "--body", `## Task: ${name}\n\n${prompt}`, "--head", name],
         { cwd: this.repoPath, encoding: "utf-8" },
       ).trim();
       const prUrl = output.split("\n").pop() ?? null;

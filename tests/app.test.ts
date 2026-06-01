@@ -3,6 +3,7 @@ import { execSync } from "node:child_process";
 
 vi.mock("node:child_process", () => ({
   execSync: vi.fn(),
+  execFileSync: vi.fn(),
 }));
 
 import type { LoomerApp } from "../src/app.js";

@@ -53,7 +53,9 @@
 **设计约束**:
 
 1. **独立隔离**: 每个 agent 在独立 git worktree 中执行，互不干扰
-2. **prompt 注入**: skill 前缀（TDD/review/系统调试规则）可配置开关
+9. **shell 参数安全**: 执行 shell 命令时，外部来源的参数（文件名、分支名、路径等）必须用 `execFileSync` 参数数组传递，禁止字符串插值进 `execSync`，防止命令注入
+10. **唯一真相源禁止影子缓存**: 内存中不允许维护与 StateStore 冗余的状态缓存（如 taskStatus Map），所有状态查询必须走 StateStore；内存缓存仅允许用于只读性能优化且必须标注过期来源
+11. **prompt 注入**: skill 前缀（TDD/review/系统调试规则）可配置开关
 3. **输出实时可读**: agent 输出必须实时解析，不能等进程结束后再读
 4. **exit_code 权威**: 进程退出码是 DONE/CRASHED 判断的第一权威来源
 5. **monitor 回写**: 进程退出时必须将 exit_code 写入状态存储（供跨实例检测）
@@ -63,7 +65,7 @@
 
 **可选方案**: child_process.spawn + stdout pipe 实时消费 / 其他
 
-**不变量**: prompt 传递方式不必固定（argv / stdin / 临时文件均可），但必须保证：(a) prompt 不泄漏到 /proc 或 ps，(b) 进程退出时 exit_code 写入状态存储。
+**不变量**: prompt 传递方式不必固定（argv / stdin / 临时文件均可），但必须保证：(a) prompt 不泄漏到 /proc 或 ps，(b) 进程退出时 exit_code 写入状态存储，(c) 所有 shell 命令的外部参数禁止字符串插值（见约束 9），(d) 不允许与 StateStore 冗余的独立状态缓存（见约束 10）。
 
 → 详见 [technical-decisions.md §2-3](technical-decisions.md)
 
@@ -95,7 +97,7 @@
 1. **评估必须在 merge 之前**: `assess_risk()` 必须在 `_merge_agent()` 之前调用（merge 后 diff 为空）
 2. **diff 范围**: `git diff <base_branch>...HEAD`（捕获已提交的改动）
 3. **6 个风险信号**: 每个信号独立判定 LOW/HIGH
-4. **整体规则**: 任一 HIGH → 整体 HIGH
+4. **整体规则**: 任一 HIGH → 整体 HIGH（autoMergeRules 可覆盖：conflict="auto" 时冲突信号降为 LOW，testFail="auto" 时测试缺失降为 LOW）
 5. **3 种 merge 策略**: auto（LOW 自动 merge / HIGH 进 REVIEW）、always（全部 REVIEW）、never（全部 ACCEPTED）
 6. **冲突检测**: 试合并 + 回滚，不改变工作区
 7. **PR 创建**: REVIEW 时自动创建 PR，失败不阻塞
@@ -263,7 +265,7 @@ git merge → 冲突
 3. **Web 自动关闭**: 全终态且无 REVIEW/CONFLICTED → 自动 `stopServer()` 释放端口；有 REVIEW/CONFLICTED 则保留
 4. **Web 手动管控**: CLI `loomer web-start [--port]`/`loomer web-stop` + API `POST /api/web/start|stop`
 5. **CLI HTTP 薄客户端**: 其余子命令（done/kill/retry/accept/reject/log/status）通过 HTTP 发给运行中的主进程；主进程未运行时 status/log 可直读 SQLite（只读）
-6. **SIGINT/SIGTERM 优雅关闭**: 捕获信号 → 停止轮询 → 停止 Web → 杀子进程 → 退出
+6. **SIGINT/SIGTERM 优雅关闭**: 捕获信号 → 停止轮询 → 停止 Web → 关闭 StateStore（DB 连接 + WAL 锁释放）→ 杀子进程 → 退出
 7. **LoomerApp.create() 工厂方法**: CLI 入口必须通过 `LoomerApp.create(config)` 工厂方法创建实例（内部构建依赖），构造函数保留给测试（依赖注入）
 8. **全局 shutdown**: CLI `loomer shutdown` + API `POST /api/shutdown` → 优雅关闭整个 LoomerApp
 
@@ -301,6 +303,8 @@ git merge → 冲突
 | 22 | Agent 操作按钮不全 | DONE→Merge, CRASHED/STALE→Retry, 非活跃→Delete |
 | 23 | Plan 统计无可视化色点 | 统计必须有色点 + 标签 |
 | 24 | LoomerApp 缺少 CLI 友好工厂方法 | 必须提供 create() 静态工厂，构造函数保留给测试 |
+| 25 | execSync 字符串插值导致命令注入 | shell 命令的外部参数必须用 execFileSync 参数数组，禁止字符串插值（§3 约束 9） |
+| 26 | PlanExecutor 内存 taskStatus 与 StateStore 不同步 | 禁止维护与 StateStore 冗余的独立状态缓存，所有状态查询走 StateStore（§3 约束 10） |
 
 → 详见 [technical-decisions.md §8](technical-decisions.md)
 

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import type { LoomerConfig } from "./config.js";
+import { MAX_OUTPUT_CHARS } from "./config.js";
 import type { RiskAssessmentData } from "./types/web.js";
 import type { AgentInfo, PlanProgress } from "./types/web.js";
 
@@ -174,10 +175,9 @@ export class LoomerClient {
         .prepare("SELECT last_output FROM agents WHERE name = ?")
         .get(name) as { last_output: string | null } | undefined;
       if (!row?.last_output) return "";
-      const MAX_CHARS = 50000;
       const output = row.last_output;
-      if (output.length > MAX_CHARS) {
-        return "...(truncated)\n" + output.slice(-MAX_CHARS);
+      if (output.length > MAX_OUTPUT_CHARS) {
+        return "...(truncated)\n" + output.slice(-MAX_OUTPUT_CHARS);
       }
       return output;
     } catch {

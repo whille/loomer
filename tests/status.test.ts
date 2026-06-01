@@ -2,6 +2,7 @@ import * as childProcess from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("node:child_process", () => ({
   execSync: vi.fn(),
+  execFileSync: vi.fn(),
 }));
 
 import { AgentNotFoundError } from "../src/errors.js";
@@ -335,12 +336,11 @@ describe("StatusDetector", () => {
       });
       detector = new StatusDetector(state, proc, 30);
 
-      vi.mocked(childProcess.execSync).mockImplementation((cmd: string) => {
-        if (cmd === "git status --porcelain") return "M file.ts\n";
-        if (cmd === "git add -A") return "";
-        if (cmd.includes("git diff --cached --quiet"))
-          throw new Error("has changes");
-        if (cmd.includes("git commit")) return "";
+      vi.mocked(childProcess.execFileSync).mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === "git" && args[0] === "status") return "M file.ts\n";
+        if (cmd === "git" && args[0] === "add") return "";
+        if (cmd === "git" && args[0] === "diff") throw new Error("has changes");
+        if (cmd === "git" && args[0] === "commit") return "";
         return "";
       });
 
@@ -349,7 +349,7 @@ describe("StatusDetector", () => {
         "test-agent",
         Status.DONE,
       );
-      vi.mocked(childProcess.execSync).mockRestore();
+      vi.mocked(childProcess.execFileSync).mockRestore();
     });
 
     it("auto-commit 失败仍返回 DONE", () => {
@@ -365,13 +365,13 @@ describe("StatusDetector", () => {
       });
       detector = new StatusDetector(state, proc, 30);
 
-      vi.mocked(childProcess.execSync).mockImplementation((cmd: string) => {
-        if (cmd === "git status --porcelain") return "M file.ts\n";
+      vi.mocked(childProcess.execFileSync).mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === "git" && args[0] === "status") return "M file.ts\n";
         throw new Error("git failed");
       });
 
       expect(detector.getStatus("test-agent")).toBe(Status.DONE);
-      vi.mocked(childProcess.execSync).mockRestore();
+      vi.mocked(childProcess.execFileSync).mockRestore();
     });
 
     it("worktree = null → 跳过 step 8", () => {
@@ -432,7 +432,7 @@ describe("StatusDetector", () => {
       killSpy.mockRestore();
     });
 
-    it("STALE 优先于 isAlive", () => {
+    it("isAlive 时超时不算 STALE（修复误判）", () => {
       const agent = createAgent({
         started_at: Date.now() / 1000 - 31 * 60,
       });
@@ -440,8 +440,18 @@ describe("StatusDetector", () => {
       proc = createMockProcess({ isAlive: () => true });
       detector = new StatusDetector(state, proc, 30);
 
+      expect(detector.getStatus("test-agent")).toBe(Status.RUNNING);
+    });
+
+    it("isAlive 为 false 且超时 → STALE", () => {
+      const agent = createAgent({
+        started_at: Date.now() / 1000 - 31 * 60,
+      });
+      state = createMockState({ "test-agent": agent });
+      proc = createMockProcess({ isAlive: () => false });
+      detector = new StatusDetector(state, proc, 30);
+
       expect(detector.getStatus("test-agent")).toBe(Status.STALE);
-      expect(proc.isAlive).not.toHaveBeenCalled();
     });
 
     it("isAlive 优先于 PID 检测", () => {
@@ -635,7 +645,7 @@ describe("StatusDetector", () => {
     });
 
     it("git 命令失败 → 返回空串", () => {
-      vi.mocked(childProcess.execSync).mockImplementation(() => {
+      vi.mocked(childProcess.execFileSync).mockImplementation(() => {
         throw new Error("git failed");
       });
       const agent = createAgent({ worktree: "/nonexistent" });

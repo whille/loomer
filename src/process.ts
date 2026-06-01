@@ -2,6 +2,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import type { LoomerConfig } from "./config.js";
+import { MAX_OUTPUT_CHARS } from "./config.js";
 import type { StateStore } from "./state.js";
 
 // 常见 CLI 工具路径（bun、nvm 等），确保子进程可找到
@@ -190,9 +191,8 @@ export class ProcessManager {
     const allOutput = tracked.outputLines.join("");
     const parsed = ProcessManager.parseStreamJson(allOutput.split("\n"));
     const result = parsed || allOutput;
-    const MAX_CHARS = 50000;
-    if (result.length > MAX_CHARS) {
-      return "...(truncated)\n" + result.slice(-MAX_CHARS);
+    if (result.length > MAX_OUTPUT_CHARS) {
+      return "...(truncated)\n" + result.slice(-MAX_OUTPUT_CHARS);
     }
     return result;
   }

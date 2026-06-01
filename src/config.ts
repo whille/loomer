@@ -47,6 +47,8 @@ const DEFAULTS: LoomerConfigData = {
   },
 };
 
+export const MAX_OUTPUT_CHARS = 50000;
+
 // config.json 中允许的 key 集合
 const KNOWN_KEYS = new Set(Object.keys(DEFAULTS));
 

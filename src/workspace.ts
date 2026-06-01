@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import type { LoomerConfig } from "./config.js";
 
@@ -16,34 +16,32 @@ export class WorkspaceManager {
   }
 
   create(name: string, baseBranch?: string): Workspace {
-    const branch = name;
-    const base = baseBranch ?? this.detectBaseBranch();
+    const branch =
+      baseBranch || this.detectBaseBranch() || "master";
     const worktreePath = `${this.repoPath}-${name}`;
 
-    // worktree 已存在时直接返回
-    if (this.worktreeExists(name)) {
-      return { name, path: worktreePath, branch };
-    }
-
-    // 目录残留但非 worktree 时清理
-    if (fs.existsSync(worktreePath)) {
-      fs.rmSync(worktreePath, { recursive: true, force: true });
-      execSync("git worktree prune", {
+    // 清理残留 worktree
+    try {
+      execFileSync("git", ["worktree", "prune"], {
         cwd: this.repoPath,
         encoding: "utf-8",
-        stdio: ["pipe", "pipe", "pipe"],
       });
+    } catch {
+      // 忽略
     }
 
-    // 分支已存在时不带 -b，否则创建新分支
-    const branchExists = this.exists(branch);
-    const cmd = branchExists
-      ? `git worktree add "${worktreePath}" "${branch}"`
-      : `git worktree add -b "${branch}" "${worktreePath}" "${base}"`;
-    execSync(cmd, {
-      cwd: this.repoPath,
-      encoding: "utf-8",
-    });
+    const branchExists = this.exists(name);
+    if (branchExists) {
+      execFileSync("git", ["worktree", "add", worktreePath, branch], {
+        cwd: this.repoPath,
+        encoding: "utf-8",
+      });
+    } else {
+      execFileSync("git", ["worktree", "add", "-b", name, worktreePath, branch], {
+        cwd: this.repoPath,
+        encoding: "utf-8",
+      });
+    }
 
     return { name, path: worktreePath, branch };
   }
@@ -51,71 +49,60 @@ export class WorkspaceManager {
   remove(name: string): void {
     const worktreePath = `${this.repoPath}-${name}`;
     try {
-      execSync(`git worktree remove "${worktreePath}" --force`, {
+      execFileSync("git", ["worktree", "remove", worktreePath, "--force"], {
         cwd: this.repoPath,
         encoding: "utf-8",
-        stdio: ["pipe", "pipe", "pipe"],
       });
     } catch {
-      // worktree 不存在时不报错
+      // worktree 可能已不存在
     }
     try {
-      execSync(`git branch -D "${name}"`, {
+      execFileSync("git", ["branch", "-D", name], {
         cwd: this.repoPath,
         encoding: "utf-8",
-        stdio: ["pipe", "pipe", "pipe"],
       });
     } catch {
-      // 分支不存在时不报错
+      // 分支可能已不存在
     }
   }
 
   listAll(): Workspace[] {
-    const output = execSync("git worktree list --porcelain", {
+    const output = execFileSync("git", ["worktree", "list", "--porcelain"], {
       cwd: this.repoPath,
       encoding: "utf-8",
-    }).trim();
-    const entries: Workspace[] = [];
-    let currentPath = "";
-    let currentBranch = "";
-
-    for (const line of output.split("\n")) {
-      if (line.startsWith("worktree ")) {
-        currentPath = line.slice("worktree ".length);
-      } else if (line.startsWith("branch refs/heads/")) {
-        currentBranch = line.slice("branch refs/heads/".length);
-        if (currentPath && currentBranch) {
-          entries.push({
-            name: currentBranch,
-            path: currentPath,
-            branch: currentBranch,
+    });
+    const worktrees: Workspace[] = [];
+    const lines = output.trim().split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith("worktree ")) {
+        const wtPath = lines[i].split(" ").slice(1).join(" ");
+        const branchLine = lines
+          .slice(i + 1)
+          .find((l) => l.startsWith("branch "));
+        if (branchLine) {
+          const branch = branchLine.split(" ")[1];
+          worktrees.push({
+            name: branch,
+            path: wtPath,
+            branch,
           });
         }
       }
     }
-    return entries;
+    return worktrees;
   }
 
   exists(name: string): boolean {
-    try {
-      const output = execSync(`git branch --list "${name}"`, {
-        cwd: this.repoPath,
-        encoding: "utf-8",
-      });
-      return output.trim().length > 0;
-    } catch {
-      return false;
-    }
-  }
-
-  /** 检查 worktree（非分支）是否已注册 */
-  worktreeExists(name: string): boolean {
-    return this.listAll().some((w) => w.name === name);
+    const output = execFileSync("git", ["branch", "--list", name], {
+      cwd: this.repoPath,
+      encoding: "utf-8",
+    });
+    return output.trim().length > 0;
   }
 
   private detectBaseBranch(): string {
     try {
-      return execSync("git rev-parse --abbrev-ref HEAD", {
+      return execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
         cwd: this.repoPath,
         encoding: "utf-8",
       }).trim();
