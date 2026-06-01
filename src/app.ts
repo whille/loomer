@@ -784,13 +784,14 @@ export class LoomerApp {
           if (resolved === null) return false;
           fs.writeFileSync(filePath, resolved);
         } else {
-          // 非 package.json：用冲突标记提取 ours/theirs 块
-          const content = fs.readFileSync(filePath, "utf-8");
-          const { ours, theirs } = this._extractConflictSides(content);
-          if (ours === null || theirs === null) return false;
-          const resolved = autoResolveConflictFile(file, ours, theirs);
-          if (resolved === null) return false;
-          fs.writeFileSync(filePath, resolved);
+          // 非 package.json/.lock：ours 优先策略（同文件双方都改 → 保留主分支）
+          try {
+            execFileSync("git", ["checkout", "--ours", "--", file], {
+              cwd: mergeDir, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"],
+            });
+          } catch {
+            return false;
+          }
         }
       } catch {
         return false;
