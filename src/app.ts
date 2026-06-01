@@ -381,12 +381,29 @@ export class LoomerApp {
   startServer(port?: number): http.Server | null {
     if (this.server) return this.server;
     const expressApp = createApp(this.config, this);
-    const p = port ?? this.config.defaultPort;
-    const server = expressApp.listen(p);
+    const basePort = port ?? this.config.defaultPort;
+
+    // 尝试从 basePort 起递增找可用端口（最多试 100 个）
+    let server: http.Server | null = null;
+    let actualPort = basePort;
+    for (let offset = 0; offset < 100; offset++) {
+      actualPort = basePort + offset;
+      try {
+        server = expressApp.listen(actualPort);
+        break;
+      } catch {
+        continue;
+      }
+    }
+
+    if (!server) {
+      console.error(`No available port in range ${basePort}-${actualPort}. Web dashboard not started.`);
+      return null;
+    }
 
     server.on("error", (err: NodeJS.ErrnoException) => {
       if (err.code === "EADDRINUSE") {
-        console.error(`Port ${p} is already in use. Web dashboard not started.`);
+        console.error(`Port ${actualPort} is already in use. Web dashboard not started.`);
         this.server = null;
         this.serverPort = null;
       } else {
@@ -395,11 +412,11 @@ export class LoomerApp {
     });
 
     server.on("listening", () => {
-      process.stderr.write(`Web dashboard: http://localhost:${p}\n`);
+      process.stderr.write(`Web dashboard: http://localhost:${actualPort}\n`);
     });
 
     this.server = server;
-    this.serverPort = p;
+    this.serverPort = actualPort;
     return this.server;
   }
 
