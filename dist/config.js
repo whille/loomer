@@ -1,0 +1,112 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+// 支持 HOME 环境变量覆盖（便于测试）
+function getHome() {
+    return process.env.HOME || os.homedir();
+}
+const DEFAULTS = {
+    baseBranch: "",
+    claudePath: "claude",
+    claudeArgs: [],
+    defaultPort: 3000,
+    defaultTimeoutMinutes: 30,
+    maxConcurrent: 3,
+    stateDir: "~/.loomer",
+    mergeStrategy: "auto",
+    createPr: false,
+    autoMergeRules: {
+        maxFiles: 20,
+        maxLines: 1000,
+        conflict: "review",
+        testFail: "auto",
+    },
+};
+export const MAX_OUTPUT_CHARS = 50000;
+// config.json 中允许的 key 集合
+const KNOWN_KEYS = new Set(Object.keys(DEFAULTS));
+function readJsonFile(filePath) {
+    try {
+        if (!fs.existsSync(filePath))
+            return null;
+        const raw = fs.readFileSync(filePath, "utf-8");
+        return JSON.parse(raw);
+    }
+    catch {
+        return null;
+    }
+}
+function applyOverrides(base, overrides) {
+    const result = { ...base };
+    const knownTopLevelKeys = KNOWN_KEYS;
+    for (const [key, value] of Object.entries(overrides)) {
+        if (!knownTopLevelKeys.has(key))
+            continue;
+        if (key === "autoMergeRules" &&
+            typeof value === "object" &&
+            value !== null) {
+            result.autoMergeRules = {
+                ...result.autoMergeRules,
+                ...value,
+            };
+        }
+        else {
+            result[key] = value;
+        }
+    }
+    return result;
+}
+export class LoomerConfig {
+    baseBranch;
+    claudePath;
+    claudeArgs;
+    defaultPort;
+    defaultTimeoutMinutes;
+    maxConcurrent;
+    stateDir;
+    mergeStrategy;
+    createPr;
+    autoMergeRules;
+    /** ~ 展开后的绝对路径 */
+    resolvedStateDir;
+    constructor(data = DEFAULTS) {
+        this.baseBranch = data.baseBranch;
+        this.claudePath = data.claudePath;
+        this.claudeArgs = data.claudeArgs;
+        this.defaultPort = data.defaultPort;
+        this.defaultTimeoutMinutes = data.defaultTimeoutMinutes;
+        this.maxConcurrent = data.maxConcurrent;
+        this.stateDir = data.stateDir;
+        this.mergeStrategy = data.mergeStrategy;
+        this.createPr = data.createPr;
+        this.autoMergeRules = { ...data.autoMergeRules };
+        this.resolvedStateDir = this.stateDir.replace(/^~(?=\/)/, getHome());
+    }
+    /**
+     * 三层覆盖加载：全局 ~/.loomer/config.json → 项目 .loomer.json → CLI overrides
+     * 优先级：CLI > 项目 > 全局 > 内置默认
+     * 未知 key 静默忽略
+     */
+    static load(configPath, overrides) {
+        let data = { ...DEFAULTS };
+        // 1. 加载全局 ~/.loomer/config.json
+        const globalPath = path.join(getHome(), ".loomer", "config.json");
+        const globalData = readJsonFile(globalPath);
+        if (globalData) {
+            data = applyOverrides(data, globalData);
+        }
+        // 2. 加载项目 .loomer.json（覆盖全局）
+        if (configPath) {
+            const projectData = readJsonFile(configPath);
+            if (projectData) {
+                data = applyOverrides(data, projectData);
+            }
+        }
+        // 3. 应用 CLI overrides
+        if (overrides) {
+            data = applyOverrides(data, overrides);
+        }
+        return new LoomerConfig(data);
+    }
+}
+//# sourceMappingURL=config.js.map
