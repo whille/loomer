@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.worktrees/
+~/.loomer/
+*.db
+tests/e2e/fixtures-TS-*/
