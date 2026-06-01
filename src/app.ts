@@ -493,19 +493,37 @@ export class LoomerApp {
     } catch {
       hasChanges = true; // status 失败时保守假设有变更
     }
-    if (!hasChanges) return; // 真正无变更，跳过
+    if (!hasChanges) {
+      // 即使 worktree 无未提交变更，分支也可能有新 commit（agent 已自行 commit）
+      const baseBranch = this.config.baseBranch || "master";
+      try {
+        const logOutput = execFileSync("git", ["log", `${baseBranch}..${name}`, "--oneline"], {
+          cwd: this.repoPath, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"],
+        }).trim();
+        if (!logOutput) return; // 真正无新 commit，跳过 merge
+      } catch {
+        // log 检查失败，继续尝试 merge
+      }
+    }
 
-    // auto-commit（在 agent 分支上）
-    const safeName = name.replace(/[^a-zA-Z0-9_-]/g, "_");
-    execFileSync("git", ["commit", "-m", `feat: ${safeName} auto-commit`], {
-      cwd: worktreePath,
-      encoding: "utf-8",
-    });
+    // auto-commit（在 agent 分支上）— 仅在有 uncommitted changes 时
+    if (hasChanges) {
+      const safeName = name.replace(/[^a-zA-Z0-9_-]/g, "_");
+      try {
+        execFileSync("git", ["commit", "-m", `feat: ${safeName} auto-commit`], {
+          cwd: worktreePath,
+          encoding: "utf-8",
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+      } catch (err) {
+        console.warn(`[_doMergeAgent] auto-commit failed for ${name}: ${err}`);
+      }
+    }
 
     // merge 到主分支 — 在主仓库中执行
+    const baseBranch = this.config.baseBranch || "master";
     try {
-      const baseBranch = this.config.baseBranch || "master";
-      execFileSync("git", ["merge", name], {
+      execFileSync("git", ["merge", "--no-ff", name, "-m", `Merge ${name} into ${baseBranch}`], {
         cwd: this.repoPath,
         encoding: "utf-8",
       });
