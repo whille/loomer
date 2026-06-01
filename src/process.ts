@@ -107,9 +107,7 @@ export class ProcessManager {
       cwd: worktreePath,
       stdio: ["pipe", "pipe", "pipe"],
       env,
-      detached: true,
     });
-    child.unref();
 
     // -p 模式已通过命令行参数传 prompt；关闭 stdin 让 claude CLI 不再等待
     child.stdin.end();
@@ -150,23 +148,7 @@ export class ProcessManager {
   stop(name: string): void {
     const tracked = this.processes.get(name);
     if (tracked && !tracked.exited) {
-      const pid = tracked.child.pid;
-      // 杀整个进程组（负 PID），避免孙子进程变孤儿
-      try {
-        if (pid) process.kill(-pid, "SIGTERM");
-      } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code;
-        if (code === "ESRCH") {
-          // 进程组已退出，降级杀主进程
-          tracked.child.kill("SIGTERM");
-        } else {
-          // EPERM 或意外错误，记录日志仍尝试降级
-          console.warn(
-            `[ProcessManager] process.kill(-${pid}) failed: ${code ?? err}`,
-          );
-          tracked.child.kill("SIGTERM");
-        }
-      }
+      tracked.child.kill("SIGTERM");
     }
   }
 
