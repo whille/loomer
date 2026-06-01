@@ -79,9 +79,7 @@ export class ProcessManager {
       "-p",
       prompt,
       "--output-format",
-      "stream-json",
-      "--verbose",
-      "--include-partial-messages",
+      "json",
       "--allowedTools",
       "Bash,Read,Write,Edit,MultiEdit,Glob,Grep,LS",
       "--disallowed-tools",
@@ -112,9 +110,7 @@ export class ProcessManager {
     });
     child.unref();
 
-    // stdin pipe 传 prompt
-    child.stdin.write(prompt);
-    child.stdin.end();
+    // -p 模式已通过命令行参数传 prompt，无需 stdin
 
     const tracked: TrackedChild = {
       child,
@@ -222,32 +218,25 @@ export class ProcessManager {
   }
 
   static parseStreamJson(lines: string[]): string {
-    const textParts: string[] = [];
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const event = JSON.parse(line) as Record<string, unknown>;
-        if (event.type === "content_block_delta") {
-          const delta = event.delta as Record<string, unknown> | undefined;
-          if (delta?.type === "text_delta") {
-            textParts.push((delta.text as string) || "");
-          }
-          // 跳过 tool_use/input_json_delta 等
-        } else if (event.type === "result") {
-          const result = event.result as
-            | Array<Record<string, unknown>>
-            | undefined;
-          for (const block of result ?? []) {
-            if (block.type === "text")
-              textParts.push((block.text as string) || "");
-            // 跳过 tool_use / tool_result 块
-          }
+    // --output-format json 输出单个 JSON 对象（非逐行流）
+    const raw = lines.join("\n").trim();
+    if (!raw) return "";
+    try {
+      const obj = JSON.parse(raw) as Record<string, unknown>;
+      // json 模式：顶层有 result 字段
+      if (typeof obj.result === "string") return obj.result;
+      // 兼容旧的 stream-json 逐行格式
+      if (obj.type === "result") {
+        const result = obj.result as Array<Record<string, unknown>> | undefined;
+        const parts: string[] = [];
+        for (const block of result ?? []) {
+          if (block.type === "text") parts.push((block.text as string) || "");
         }
-        // 跳过 message_start, message_delta, content_block_start, content_block_stop 等控制事件
-      } catch {
-        // 非 JSON 行
+        if (parts.length > 0) return parts.join("");
       }
+    } catch {
+      // 非 JSON，原样返回
     }
-    return textParts.length > 0 ? textParts.join("") : lines.join("\n");
+    return raw;
   }
 }
