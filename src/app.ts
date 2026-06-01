@@ -273,6 +273,93 @@ export class LoomerApp {
     });
   }
 
+  /** 手动解决冲突后调用：git add + commit + validate → 继续后续流程 */
+  resolve(name: string): void {
+    const agent = this.state.getAgent(name);
+    if (!agent) throw new AgentNotFoundError(`Agent not found: ${name}`);
+    if (agent.status !== "CONFLICTED") {
+      throw new Error(`Agent ${name} is not CONFLICTED (current: ${agent.status})`);
+    }
+
+    // 1. 检查是否还有未解决的冲突文件
+    try {
+      const output = execFileSync("git", ["diff", "--name-only", "--diff-filter=U"], {
+        cwd: this.repoPath, encoding: "utf-8",
+      }).trim();
+      if (output) {
+        throw new MergeError("Unresolved conflicts remain", output.split("\n").filter(Boolean));
+      }
+    } catch (err) {
+      if (err instanceof MergeError) throw err;
+      throw new MergeError("No merge in progress — cannot resolve");
+    }
+
+    // 2. git add + commit
+    try {
+      execFileSync("git", ["add", "-A"], { cwd: this.repoPath, encoding: "utf-8" });
+      execFileSync("git", ["commit", "-m", "merge: manually resolved conflicts"], {
+        cwd: this.repoPath, encoding: "utf-8",
+      });
+    } catch {
+      throw new MergeError("Failed to commit resolved files");
+    }
+
+    // 3. 可选验证
+    const hasTsconfig = fs.existsSync(path.join(this.repoPath, "tsconfig.json"));
+    const validators = [
+      { cmd: "npx", args: ["tsc", "--noEmit"], required: hasTsconfig },
+      { cmd: "npx", args: ["biome", "check", "src/"], required: false },
+      { cmd: "npx", args: ["vitest", "run"], required: false },
+    ];
+    for (const v of validators) {
+      try {
+        execFileSync(v.cmd, v.args, {
+          cwd: this.repoPath, encoding: "utf-8",
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+      } catch {
+        if (v.required) throw new MergeError("Validation failed after conflict resolution");
+      }
+    }
+
+    // 4. 记录 merge commit SHA
+    try {
+      const sha = execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: this.repoPath, encoding: "utf-8",
+      }).trim();
+      this.state.updateAgent(name, { merge_commit_sha: sha });
+    } catch { /* 忽略 */ }
+
+    // 5. 继续 done() 的后续流程：分级决策
+    this.processManager.stop(name);
+    const strategy = this.config.mergeStrategy;
+    if (strategy === "never") {
+      this.state.updateAgentStatus(name, "ACCEPTED");
+      this.workspaceManager.remove(name);
+      this.state.archiveAgent(name);
+      this._triggerDepResolution(name);
+    } else if (strategy === "always") {
+      this.state.updateAgentStatus(name, "REVIEW");
+    } else {
+      const assessment = this.safety.assessRisk(
+        name,
+        agent.worktree || "",
+        strategy,
+        this.config.autoMergeRules,
+        this.config.baseBranch || undefined,
+      );
+      this.state.updateAgent(name, { risk_assessment: assessment.toDict() });
+      if (assessment.level === "LOW") {
+        this.state.updateAgentStatus(name, "ACCEPTED");
+        this.workspaceManager.remove(name);
+        this.state.archiveAgent(name);
+        this._triggerDepResolution(name);
+      } else {
+        this.state.updateAgentStatus(name, "REVIEW");
+      }
+    }
+  }
+
   // === 查询 ===
 
   getTaskStatus(id: string): string | undefined {

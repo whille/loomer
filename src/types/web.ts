@@ -71,6 +71,7 @@ export interface LoomerAppLike {
   done(name: string): void;
   accept(name: string): void;
   reject(name: string): void;
+  resolve(name: string): void;
   kill(name: string, clean?: boolean): void;
   retry(name: string): void;
   status(): AgentInfo[];

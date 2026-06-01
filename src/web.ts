@@ -242,6 +242,16 @@ export function createApp(
     }
   });
 
+  // POST /api/resolve/:name
+  app.post("/api/resolve/:name", validateNameParam, (req, res, next) => {
+    try {
+      getApp(loomerApp).resolve(req.params.name as string);
+      res.json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // --- Plan ---
 
   // POST /api/plan/run

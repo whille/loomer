@@ -99,6 +99,16 @@ export function createStubApp(): StubApp {
       agents.set(name, { ...agent, status: "REJECTED" });
     },
 
+    resolve(name: string): void {
+      const agent = getOrThrow(name);
+      if (agent.status !== "CONFLICTED") {
+        throw new AgentNotFoundError(
+          `Agent '${name}' is not in CONFLICTED state`,
+        );
+      }
+      agents.set(name, { ...agent, status: "REVIEW" });
+    },
+
     kill(name: string, clean?: boolean): void {
       getOrThrow(name);
       const agent = agents.get(name)!;

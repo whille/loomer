@@ -36,7 +36,8 @@
     DONE: [{ action: "done", label: "Merge", cls: "btn-success" }],
     CRASHED: [{ action: "retry", label: "Retry", cls: "btn-warning" }],
     CONFLICTED: [
-      { action: "retry", label: "Resolve", cls: "btn-warning" },
+      { action: "resolve", label: "Resolve", cls: "btn-success" },
+      { action: "retry", label: "Retry", cls: "btn-warning" },
       { action: "kill", label: "Discard", cls: "btn-danger", query: "?clean=1" },
     ],
     STALE: [{ action: "retry", label: "Retry", cls: "btn-warning" }],
@@ -148,6 +149,16 @@
   }
 
   function handleAction(name, action, btn, query) {
+    if (action === "resolve") {
+      btn.disabled = true;
+      apiPost("/api/resolve/" + encodeURIComponent(name))
+        .then(() => fetchAgents())
+        .catch((err) => {
+          alert("Resolve failed: " + err.message + "\n\nFix conflicts in the repo, then click Resolve again.");
+        })
+        .finally(() => { btn.disabled = false; });
+      return;
+    }
     btn.disabled = true;
     const url = "/api/" + action + "/" + encodeURIComponent(name) + (query || "");
     apiPost(url)
