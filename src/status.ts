@@ -159,9 +159,13 @@ export class StatusDetector {
         : this._updateAndFire(name, Status.CRASHED);
     }
 
-    // Step 7: 日志有内容 + 进程已退出
+    // Step 7: 日志有内容 + 进程已退出 → 检查 exit_code
     const output = this.process.getRecentOutput(name);
     if (output.trim().length > 0 && !this.process.isAlive(name)) {
+      const exitCode = agent.exit_code ?? this.process.getExitCode(name);
+      if (exitCode !== null && exitCode !== 0) {
+        return this._updateAndFire(name, Status.CRASHED);
+      }
       return this._updateAndFire(name, Status.DONE);
     }
 
