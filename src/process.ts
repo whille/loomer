@@ -79,7 +79,7 @@ export class ProcessManager {
       "-p",
       prompt,
       "--output-format",
-      "json",
+      "stream-json",
       "--allowedTools",
       "Bash,Read,Write,Edit,MultiEdit,Glob,Grep,LS",
       "--disallowed-tools",
@@ -110,7 +110,8 @@ export class ProcessManager {
     });
     child.unref();
 
-    // -p 模式已通过命令行参数传 prompt，无需 stdin
+    // -p 模式已通过命令行参数传 prompt；关闭 stdin 让 claude CLI 不再等待
+    child.stdin.end();
 
     const tracked: TrackedChild = {
       child,
@@ -218,25 +219,24 @@ export class ProcessManager {
   }
 
   static parseStreamJson(lines: string[]): string {
-    // --output-format json 输出单个 JSON 对象（非逐行流）
-    const raw = lines.join("\n").trim();
-    if (!raw) return "";
-    try {
-      const obj = JSON.parse(raw) as Record<string, unknown>;
-      // json 模式：顶层有 result 字段
-      if (typeof obj.result === "string") return obj.result;
-      // 兼容旧的 stream-json 逐行格式
-      if (obj.type === "result") {
-        const result = obj.result as Array<Record<string, unknown>> | undefined;
-        const parts: string[] = [];
-        for (const block of result ?? []) {
-          if (block.type === "text") parts.push((block.text as string) || "");
+    const textParts: string[] = [];
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const event = JSON.parse(line) as Record<string, unknown>;
+        if (event.type === "result") {
+          if (typeof event.result === "string") {
+            textParts.push(event.result);
+          } else if (Array.isArray(event.result)) {
+            for (const block of event.result as Record<string, unknown>[]) {
+              if (block.type === "text") textParts.push((block.text as string) || "");
+            }
+          }
         }
-        if (parts.length > 0) return parts.join("");
+      } catch {
+        // 非 JSON 行
       }
-    } catch {
-      // 非 JSON，原样返回
     }
-    return raw;
+    return textParts.length > 0 ? textParts.join("") : lines.join("\n");
   }
 }

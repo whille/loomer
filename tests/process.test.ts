@@ -57,7 +57,7 @@ describe("ProcessManager", () => {
   });
 
   describe("start", () => {
-    it("spawn 包含 -p 和 --output-format json", () => {
+    it("spawn 包含 -p 和 --output-format stream-json", () => {
       const fakeChild = makeFakeChild();
       vi.mocked(spawn).mockReturnValue(fakeChild as never);
 
@@ -66,7 +66,7 @@ describe("ProcessManager", () => {
       const [cmd, args, options] = vi.mocked(spawn).mock.calls[0];
       expect(cmd).toBe("claude");
       expect(args).toContain("--output-format");
-      expect(args).toContain("json");
+      expect(args).toContain("stream-json");
       expect(args).toContain("-p");
     });
 
