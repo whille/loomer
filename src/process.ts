@@ -133,11 +133,15 @@ export class ProcessManager {
       );
     });
 
-    // exit 回调写 exit_code
+    // exit 回调写 exit_code + last_output
     child.on("exit", (code: number | null) => {
       tracked.exitCode = code;
       tracked.exited = true;
-      this.state.updateAgent(name, { exit_code: code, pid: null });
+      const recentOutput = this.getRecentOutput(name);
+      const truncated = recentOutput.length > MAX_OUTPUT_CHARS
+        ? recentOutput.slice(-MAX_OUTPUT_CHARS)
+        : recentOutput;
+      this.state.updateAgent(name, { exit_code: code, pid: null, last_output: truncated });
     });
 
     this.processes.set(name, tracked);

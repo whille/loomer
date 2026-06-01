@@ -6,7 +6,6 @@ export interface LoomerConfig {
   defaultTimeoutMinutes: number;
   maxConcurrent: number;
   stateDir: string;
-  skillPrefix: boolean;
   mergeStrategy: "auto" | "always" | "never";
   createPr: boolean;
   autoMergeRules: {
@@ -84,4 +83,5 @@ export interface LoomerAppLike {
   stopServer(): void;
   getServerPort(): number | null;
   shutdown(): void;
+  getTaskStatus(id: string): string | undefined;
 }

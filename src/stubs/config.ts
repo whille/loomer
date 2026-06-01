@@ -8,7 +8,6 @@ const defaults: LoomerConfig = {
   defaultTimeoutMinutes: 30,
   maxConcurrent: 5,
   stateDir: "~/.loomer",
-  skillPrefix: true,
   mergeStrategy: "auto",
   createPr: false,
   autoMergeRules: {

@@ -20,6 +20,7 @@ export interface AgentData {
   risk_assessment: RiskAssessmentData | null;
   last_output: string | null;
   pr_url: string | null;
+  merge_commit_sha: string | null;
   archived: boolean;
   depends_on: string[];
   plan: string | null;
@@ -46,6 +47,7 @@ CREATE TABLE IF NOT EXISTS agents (
   risk_assessment TEXT,
   last_output TEXT,
   pr_url TEXT,
+  merge_commit_sha TEXT,
   archived INTEGER NOT NULL DEFAULT 0,
   depends_on TEXT,
   plan TEXT
@@ -83,6 +85,7 @@ function rowToAgent(row: Record<string, unknown>): AgentData {
       : null,
     last_output: (row.last_output as string | null) ?? null,
     pr_url: (row.pr_url as string | null) ?? null,
+    merge_commit_sha: (row.merge_commit_sha as string | null) ?? null,
     archived: Boolean(row.archived),
     depends_on: row.depends_on
       ? (JSON.parse(row.depends_on as string) as string[])
@@ -119,8 +122,9 @@ export class StateStore {
   }
 
   updateAgent(name: string, fields: Record<string, unknown>): void {
-    const existing = this.getAgent(name);
-    if (existing) {
+    const doUpdate = this.db.transaction(() => {
+      const existing = this.getAgent(name);
+      if (existing) {
       const merged: Record<string, unknown> = {
         ...this.agentToRow(existing),
         ...this.fieldsToRow(fields),
@@ -128,7 +132,7 @@ export class StateStore {
       };
       this.db
         .prepare(
-          "UPDATE agents SET status=?, branch=?, prompt=?, worktree=?, started_at=?, pid=?, exit_code=?, risk_assessment=?, last_output=?, pr_url=?, archived=?, depends_on=?, plan=? WHERE name=?",
+          "UPDATE agents SET status=?, branch=?, prompt=?, worktree=?, started_at=?, pid=?, exit_code=?, risk_assessment=?, last_output=?, pr_url=?, merge_commit_sha=?, archived=?, depends_on=?, plan=? WHERE name=?",
         )
         .run(
           merged.status as string,
@@ -141,6 +145,7 @@ export class StateStore {
           merged.risk_assessment as string | null,
           merged.last_output as string | null,
           merged.pr_url as string | null,
+          merged.merge_commit_sha as string | null,
           merged.archived as number,
           merged.depends_on as string,
           merged.plan as string | null,
@@ -150,7 +155,7 @@ export class StateStore {
       const row = this.fieldsToRow(fields);
       this.db
         .prepare(
-          "INSERT INTO agents (name, status, branch, prompt, worktree, started_at, pid, exit_code, risk_assessment, last_output, pr_url, archived, depends_on, plan) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          "INSERT INTO agents (name, status, branch, prompt, worktree, started_at, pid, exit_code, risk_assessment, last_output, pr_url, merge_commit_sha, archived, depends_on, plan) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .run(
           name,
@@ -164,11 +169,14 @@ export class StateStore {
           row.risk_assessment ?? null,
           row.last_output ?? null,
           row.pr_url ?? null,
+          row.merge_commit_sha ?? null,
           row.archived ?? 0,
           row.depends_on ?? "[]",
           row.plan ?? null,
         );
     }
+    });
+    doUpdate();
   }
 
   updateAgentStatus(name: string, status: string): void {
@@ -255,18 +263,31 @@ export class StateStore {
       getAgent: (name: string): IAgentData | null => {
         const agent = this.getAgent(name);
         if (!agent) return null;
-        return {
-          name: agent.name,
-          status: agent.status,
-          pid: agent.pid,
-          started_at: agent.started_at ?? 0,
-          exit_code: agent.exit_code,
-          worktree: agent.worktree,
-        };
+        return this.agentToIAgentData(agent);
       },
       updateAgentStatus: (name: string, status: Status): void => {
         this.updateAgentStatus(name, status);
       },
+      getAllAgents: (): IAgentData[] => {
+        return this.getAllAgents().map((a) => this.agentToIAgentData(a));
+      },
+    };
+  }
+
+  private agentToIAgentData(agent: AgentData): IAgentData {
+    return {
+      name: agent.name,
+      status: agent.status,
+      worktree: agent.worktree ?? "",
+      prompt: agent.prompt,
+      started_at: agent.started_at ?? 0,
+      pid: agent.pid,
+      exit_code: agent.exit_code,
+      risk_assessment: agent.risk_assessment ? JSON.stringify(agent.risk_assessment) : null,
+      pr_url: agent.pr_url,
+      archived: agent.archived ? 1 : 0,
+      depends_on: agent.depends_on ? JSON.stringify(agent.depends_on) : null,
+      plan: agent.plan,
     };
   }
 
@@ -286,6 +307,7 @@ export class StateStore {
         : null,
       last_output: agent.last_output ?? null,
       pr_url: agent.pr_url ?? null,
+      merge_commit_sha: agent.merge_commit_sha ?? null,
       archived: agent.archived ? 1 : 0,
       depends_on: JSON.stringify(agent.depends_on ?? []),
       plan: agent.plan ?? null,
@@ -311,6 +333,7 @@ export class StateStore {
     }
     if ("last_output" in fields) row.last_output = fields.last_output;
     if ("pr_url" in fields) row.pr_url = fields.pr_url;
+    if ("merge_commit_sha" in fields) row.merge_commit_sha = fields.merge_commit_sha;
     if ("archived" in fields) row.archived = fields.archived ? 1 : 0;
     if ("depends_on" in fields)
       row.depends_on = JSON.stringify(fields.depends_on);

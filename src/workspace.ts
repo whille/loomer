@@ -43,7 +43,7 @@ export class WorkspaceManager {
       });
     }
 
-    return { name, path: worktreePath, branch };
+    return { name, path: worktreePath, branch: name };
   }
 
   remove(name: string): void {
@@ -80,7 +80,7 @@ export class WorkspaceManager {
           .slice(i + 1)
           .find((l) => l.startsWith("branch "));
         if (branchLine) {
-          const branch = branchLine.split(" ")[1];
+          const branch = branchLine.split(" ")[1].replace(/^refs\/heads\//, "");
           worktrees.push({
             name: branch,
             path: wtPath,

@@ -48,6 +48,11 @@ function requireApp(
   next();
 }
 
+function getApp(loomerApp: LoomerAppLike | undefined): LoomerAppLike {
+  if (!loomerApp) throw new Error("LoomerApp not initialized");
+  return loomerApp;
+}
+
 export function createApp(
   config?: LoomerConfig,
   loomerApp?: LoomerAppLike,
@@ -84,7 +89,7 @@ export function createApp(
   // GET /api/status
   app.get("/api/status", (req, res, next) => {
     try {
-      const agents = loomerApp!.status();
+      const agents = getApp(loomerApp).status();
       const archived = req.query.archived === "true";
       const filtered = archived
         ? agents
@@ -109,7 +114,7 @@ export function createApp(
           .status(400)
           .json({ error: "InvalidNameError", message: `Invalid agent name: '${name}'` });
       }
-      loomerApp!.start(name, prompt);
+      getApp(loomerApp).start(name, prompt);
       res.json({ ok: true });
     } catch (err) {
       next(err);
@@ -120,7 +125,7 @@ export function createApp(
   app.get("/api/log/:name", validateNameParam, (req, res, next) => {
     try {
       const name = req.params.name as string;
-      const log = loomerApp!.log(name);
+      const log = getApp(loomerApp).log(name);
       res.json({ log });
     } catch (err) {
       next(err);
@@ -146,14 +151,14 @@ export function createApp(
     let lastLen = 0;
     const interval = setInterval(() => {
       try {
-        const fullLog = loomerApp!.log(name);
+        const fullLog = getApp(loomerApp).log(name);
         if (fullLog && fullLog.length > lastLen) {
           const newChunk = fullLog.slice(lastLen);
           lastLen = fullLog.length;
           res.write(`data: ${JSON.stringify({ text: newChunk })}\n\n`);
         }
         // Check if agent is done
-        const agent = loomerApp!.status().find((a: { name: string; status: string }) => a.name === name);
+        const agent = getApp(loomerApp).status().find((a: { name: string; status: string }) => a.name === name);
         if (agent && !["RUNNING", "PENDING"].includes(agent.status)) {
           res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
           clearInterval(interval);
@@ -179,7 +184,7 @@ export function createApp(
     try {
       const name = req.params.name as string;
       const mode = (req.query.mode as string) || "stat";
-      const diff = loomerApp!.diff(name, mode);
+      const diff = getApp(loomerApp).diff(name, mode);
       res.json({ diff });
     } catch (err) {
       next(err);
@@ -189,7 +194,7 @@ export function createApp(
   // POST /api/done/:name
   app.post("/api/done/:name", validateNameParam, (req, res, next) => {
     try {
-      loomerApp!.done(req.params.name as string);
+      getApp(loomerApp).done(req.params.name as string);
       res.json({ ok: true });
     } catch (err) {
       next(err);
@@ -200,7 +205,7 @@ export function createApp(
   app.post("/api/kill/:name", validateNameParam, (req, res, next) => {
     try {
       const clean = req.query.clean === "1";
-      loomerApp!.kill(req.params.name as string, clean);
+      getApp(loomerApp).kill(req.params.name as string, clean);
       res.json({ ok: true });
     } catch (err) {
       next(err);
@@ -210,7 +215,7 @@ export function createApp(
   // POST /api/retry/:name
   app.post("/api/retry/:name", validateNameParam, (req, res, next) => {
     try {
-      loomerApp!.retry(req.params.name as string);
+      getApp(loomerApp).retry(req.params.name as string);
       res.json({ ok: true });
     } catch (err) {
       next(err);
@@ -220,7 +225,7 @@ export function createApp(
   // POST /api/accept/:name
   app.post("/api/accept/:name", validateNameParam, (req, res, next) => {
     try {
-      loomerApp!.accept(req.params.name as string);
+      getApp(loomerApp).accept(req.params.name as string);
       res.json({ ok: true });
     } catch (err) {
       next(err);
@@ -230,7 +235,7 @@ export function createApp(
   // POST /api/reject/:name
   app.post("/api/reject/:name", validateNameParam, (req, res, next) => {
     try {
-      loomerApp!.reject(req.params.name as string);
+      getApp(loomerApp).reject(req.params.name as string);
       res.json({ ok: true });
     } catch (err) {
       next(err);
@@ -248,7 +253,7 @@ export function createApp(
           .status(400)
           .json({ error: "ValidationError", message: "path or prdPath is required" });
       }
-      const result = loomerApp!.runPlan(planPath, prdPath);
+      const result = getApp(loomerApp).runPlan(planPath, prdPath);
       res.json(result);
     } catch (err) {
       next(err);
@@ -258,7 +263,7 @@ export function createApp(
   // GET /api/plan/status
   app.get("/api/plan/status", (_req, res, next) => {
     try {
-      const progress = loomerApp!.planStatus();
+      const progress = getApp(loomerApp).planStatus();
       res.json(progress);
     } catch (err) {
       next(err);
@@ -268,7 +273,7 @@ export function createApp(
   // GET /api/plan/dag
   app.get("/api/plan/dag", (_req, res, next) => {
     try {
-      const dag = loomerApp!.planDag();
+      const dag = getApp(loomerApp).planDag();
       res.json(dag);
     } catch (err) {
       next(err);

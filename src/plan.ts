@@ -346,7 +346,7 @@ export class PlanExecutor {
     let review = 0;
 
     for (const task of this.spec.tasks) {
-      const status = this.taskStatus.get(task.id) ?? "PENDING";
+      const status = this.app.getTaskStatus(task.id) ?? this.taskStatus.get(task.id) ?? "PENDING";
       switch (status) {
         case "DONE":
         case "ACCEPTED":

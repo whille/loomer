@@ -35,6 +35,8 @@ export class LoomerApp {
   private server: http.Server | null = null;
   private serverPort: number | null = null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private _mergeLocked = false;
+  private _mergeQueue: Array<{ name: string; worktreePath: string }> = [];
 
   /** 从 config 创建完整 LoomerApp（CLI 入口用） */
   static create(config: LoomerConfig, repoPath?: string): LoomerApp {
@@ -80,6 +82,15 @@ export class LoomerApp {
   onTransition(name: string, status: Status): void {
     if (status === Status.DONE) {
       this.done(name);
+      return;
+    }
+    if (this.planExecutor) {
+      switch (status) {
+        case Status.CRASHED: this.planExecutor.onTaskCrashed(name); break;
+        case Status.CONFLICTED: this.planExecutor.onTaskConflicted(name); break;
+        case Status.STALE: this.planExecutor.onTaskStale(name); break;
+        case Status.REVIEW: this.planExecutor.onTaskReview(name); break;
+      }
     }
   }
 
@@ -201,6 +212,30 @@ export class LoomerApp {
     const agent = this.state.getAgent(name);
     if (!agent) throw new AgentNotFoundError(`Agent not found: ${name}`);
 
+    // 尝试回滚已合并的改动
+    try {
+      execFileSync("git", ["merge", "--abort"], {
+        cwd: this.repoPath, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"],
+      });
+    } catch {
+      // 不在 merge 中，用记录的 merge_commit_sha 精确 revert
+      const sha = agent.merge_commit_sha;
+      if (sha) {
+        try {
+          execFileSync("git", ["revert", "--no-commit", sha], {
+            cwd: this.repoPath, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"],
+          });
+          execFileSync("git", ["commit", "-m", `revert: rejected ${name}`], {
+            cwd: this.repoPath, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"],
+          });
+        } catch {
+          console.warn(`[LoomerApp] reject: could not revert ${sha} for ${name}, manual cleanup may be needed`);
+        }
+      } else {
+        console.warn(`[LoomerApp] reject: no merge_commit_sha for ${name}, cannot auto-revert`);
+      }
+    }
+
     this.state.updateAgentStatus(name, "REJECTED");
     this.workspaceManager.remove(name);
     this.state.archiveAgent(name);
@@ -238,6 +273,10 @@ export class LoomerApp {
   }
 
   // === 查询 ===
+
+  getTaskStatus(id: string): string | undefined {
+    return this.state.getAgent(id)?.status;
+  }
 
   status(): AgentInfo[] {
     return this.state.getAllAgents().map(this.agentToInfo.bind(this));
@@ -416,11 +455,30 @@ export class LoomerApp {
       this.processManager.stop(name);
     }
     this.processManager.dispose();
+    this.state.close();
   }
 
   // === 私有方法 ===
 
   _mergeAgent(name: string, worktreePath: string): void {
+    // 并发 merge 串行化（设计规范 §6.1 约束 4）
+    if (this._mergeLocked) {
+      this._mergeQueue.push({ name, worktreePath });
+      return;
+    }
+    this._mergeLocked = true;
+    try {
+      this._doMergeAgent(name, worktreePath);
+    } finally {
+      this._mergeLocked = false;
+      const next = this._mergeQueue.shift();
+      if (next) {
+        this._mergeAgent(next.name, next.worktreePath);
+      }
+    }
+  }
+
+  private _doMergeAgent(name: string, worktreePath: string): void {
     // git add -A（agent 可能不 commit）
     execFileSync("git", ["add", "-A"], { cwd: worktreePath, encoding: "utf-8" });
 
@@ -478,6 +536,16 @@ export class LoomerApp {
         throw new MergeError(`Merge conflict for ${name}`, conflictFiles);
       }
     }
+
+    // 记录 merge commit SHA 供 reject 回滚使用
+    try {
+      const sha = execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: this.repoPath, encoding: "utf-8",
+      }).trim();
+      this.state.updateAgent(name, { merge_commit_sha: sha });
+    } catch {
+      // 忽略
+    }
   }
 
   _autoResolveConflicts(mergeDir: string): boolean {
@@ -507,9 +575,7 @@ export class LoomerApp {
         const resolved = autoResolveConflictFile(file, ours, theirs);
         if (resolved === null) return false;
 
-        // 写入解决后的内容
-        const { writeFileSync } = require("node:fs");
-        writeFileSync(filePath, resolved);
+        fs.writeFileSync(filePath, resolved);
       } catch {
         return false;
       }
@@ -522,25 +588,34 @@ export class LoomerApp {
       return false;
     }
 
-    // 验证：tsc --noEmit
-    try {
-      execFileSync("npx", ["tsc", "--noEmit"], {
-        cwd: mergeDir,
-        encoding: "utf-8",
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-    } catch {
-      // 验证失败 → 回退
+    // 验证：tsc --noEmit + 可选 biome/vitest
+    const validators = [
+      { cmd: "npx", args: ["tsc", "--noEmit"], label: "tsc", required: true },
+      { cmd: "npx", args: ["biome", "check", "src/"], label: "biome", required: false },
+      { cmd: "npx", args: ["vitest", "run"], label: "vitest", required: false },
+    ];
+    for (const v of validators) {
       try {
-        execFileSync("git", ["merge", "--abort"], {
+        execFileSync(v.cmd, v.args, {
           cwd: mergeDir,
           encoding: "utf-8",
           stdio: ["pipe", "pipe", "pipe"],
         });
       } catch {
-        // 忽略
+        if (v.required) {
+          try {
+            execFileSync("git", ["merge", "--abort"], {
+              cwd: mergeDir,
+              encoding: "utf-8",
+              stdio: ["pipe", "pipe", "pipe"],
+            });
+          } catch {
+            // 忽略
+          }
+          return false;
+        }
+        // optional validator failure → continue (tool may not be installed)
       }
-      return false;
     }
 
     // 验证通过 → auto commit

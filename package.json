@@ -12,6 +12,7 @@
   "scripts": {
     "start": "bun run src/cli.ts",
     "test": "vitest run",
+    "lint": "biome check src/",
     "build": "tsc",
     "check": "tsc --noEmit && biome check src/"
   },

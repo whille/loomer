@@ -165,8 +165,12 @@ export class StatusDetector {
       return this._updateAndFire(name, Status.DONE);
     }
 
-    // Step 8: worktree 未提交变更 → auto-commit + DONE
+    // Step 8: worktree 未提交变更 → auto-commit + DONE（仅 exit_code=0）
     if (agent.worktree && !this.process.isAlive(name)) {
+      const exitCode = agent.exit_code ?? this.process.getExitCode(name);
+      if (exitCode !== null && exitCode !== 0) {
+        return this._updateAndFire(name, Status.CRASHED);
+      }
       try {
         if (this.hasUncommittedChanges(agent.worktree)) {
           this.autoCommit(name, agent.worktree);

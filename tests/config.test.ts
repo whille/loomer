@@ -31,7 +31,6 @@ describe("LoomerConfig", () => {
     expect(cfg.defaultTimeoutMinutes).toBe(30)
     expect(cfg.maxConcurrent).toBe(3)
     expect(cfg.stateDir).toBe("~/.loomer")
-    expect(cfg.skillPrefix).toBe(true)
     expect(cfg.mergeStrategy).toBe("auto")
     expect(cfg.createPr).toBe(false)
     expect(cfg.autoMergeRules.maxFiles).toBe(20)

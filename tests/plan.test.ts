@@ -186,6 +186,11 @@ describe("PlanExecutor", () => {
       runPlan: vi.fn(),
       planStatus: vi.fn(),
       planDag: vi.fn(),
+      startServer: vi.fn(),
+      stopServer: vi.fn(),
+      getServerPort: vi.fn(() => null),
+      shutdown: vi.fn(),
+      getTaskStatus: vi.fn(() => undefined),
     };
   }
 

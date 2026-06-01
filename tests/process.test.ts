@@ -101,7 +101,7 @@ describe("ProcessManager", () => {
       // 模拟 exit 事件
       fakeChild.emit("exit", 0);
 
-      expect(state.updateAgent).toHaveBeenCalledWith("test-agent", { exit_code: 0, pid: null });
+      expect(state.updateAgent).toHaveBeenCalledWith("test-agent", { exit_code: 0, pid: null, last_output: "" });
     });
   });
 

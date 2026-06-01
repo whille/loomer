@@ -200,7 +200,9 @@ export class SafetyChecks {
         // 回滚失败，尽力清理
       }
     }
-    const conflictLevel = hasConflict ? RiskLevel.HIGH : RiskLevel.LOW;
+    const conflictLevel = hasConflict
+      ? (rules.conflict === "auto" ? RiskLevel.LOW : RiskLevel.HIGH)
+      : RiskLevel.LOW;
 
     // 信号 6: test（纯新增一律 LOW；修改已有文件但无测试变更仍为 HIGH）
     const hasTestFiles = files.some((filepath) => {

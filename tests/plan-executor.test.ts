@@ -31,6 +31,7 @@ function createMockApp(): LoomerAppLike & {
     stopServer: vi.fn(),
     getServerPort: vi.fn(() => null),
     shutdown: vi.fn(),
+    getTaskStatus: vi.fn(() => undefined),
     started,
     rejected,
   };

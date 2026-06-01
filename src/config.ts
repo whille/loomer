@@ -22,7 +22,6 @@ export interface LoomerConfigData {
   defaultTimeoutMinutes: number;
   maxConcurrent: number;
   stateDir: string;
-  skillPrefix: boolean;
   mergeStrategy: "auto" | "always" | "never";
   createPr: boolean;
   autoMergeRules: AutoMergeRules;
@@ -36,7 +35,6 @@ const DEFAULTS: LoomerConfigData = {
   defaultTimeoutMinutes: 30,
   maxConcurrent: 3,
   stateDir: "~/.loomer",
-  skillPrefix: true,
   mergeStrategy: "auto",
   createPr: false,
   autoMergeRules: {
@@ -95,7 +93,6 @@ export class LoomerConfig implements LoomerConfigData {
   defaultTimeoutMinutes: number;
   maxConcurrent: number;
   stateDir: string;
-  skillPrefix: boolean;
   mergeStrategy: "auto" | "always" | "never";
   createPr: boolean;
   autoMergeRules: AutoMergeRules;
@@ -111,7 +108,6 @@ export class LoomerConfig implements LoomerConfigData {
     this.defaultTimeoutMinutes = data.defaultTimeoutMinutes;
     this.maxConcurrent = data.maxConcurrent;
     this.stateDir = data.stateDir;
-    this.skillPrefix = data.skillPrefix;
     this.mergeStrategy = data.mergeStrategy;
     this.createPr = data.createPr;
     this.autoMergeRules = { ...data.autoMergeRules };

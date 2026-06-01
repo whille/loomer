@@ -1,0 +1,95 @@
+{
+  "project": "mini-greet",
+  "branchName": "mini-greet-v1",
+  "description": "极简多语言问候 CLI。3 个源文件 + 测试 + README，无数据库无框架。Loomer e2e 集成测试项目 #1，全流程 ~5 分钟。",
+  "userStories": [
+    {
+      "id": "US-000",
+      "title": "项目骨架",
+      "description": "作为开发者，我需要项目初始化和类型定义，确保后续 agent 写出一致的代码。",
+      "acceptanceCriteria": [
+        "创建 package.json（name: mini-greet, type: module, scripts: build/dev/test，不含 bin 字段）",
+        "创建 tsconfig.json（target ES2022, module NodeNext, strict, outDir dist）",
+        "创建 src/types.ts：导出 Language 类型（'en'|'zh'|'ja'）和 GreetingConfig 接口（{ name: string; lang: Language }）",
+        "创建 CLAUDE.md：技术栈、目录结构、编码规范",
+        "npm run build 通过"
+      ],
+      "depends": [],
+      "priority": 1
+    },
+    {
+      "id": "US-001",
+      "title": "核心问候模块",
+      "description": "作为用户，我调用 greet 函数获得多语言问候。",
+      "acceptanceCriteria": [
+        "创建 src/greet.ts：导出 greet(config: GreetingConfig): string，en→Hello, {name}! zh→你好, {name}! ja→こんにちは, {name}!",
+        "创建 src/greet.test.ts：覆盖三语言 + 默认 en",
+        "创建 src/index.ts：导出 { greet, Language }",
+        "修改 package.json：添加 exports 字段",
+        "npm run build && npx vitest run 通过"
+      ],
+      "depends": ["US-000"],
+      "priority": 2
+    },
+    {
+      "id": "US-002",
+      "title": "CLI 入口",
+      "description": "作为用户，我通过命令行使用问候功能。",
+      "acceptanceCriteria": [
+        "创建 src/cli.ts：commander, greet <name> [--lang en|zh|ja]",
+        "默认语言 en",
+        "修改 package.json：添加 bin 和 start script",
+        "npm run build && node dist/cli.js greet World --lang ja 输出 こんにちは, World!",
+        "类型检查通过"
+      ],
+      "depends": ["US-000"],
+      "priority": 2
+    },
+    {
+      "id": "US-003",
+      "title": "README",
+      "description": "作为新用户，我通过 README 快速了解和使用项目。",
+      "acceptanceCriteria": [
+        "创建 README.md：项目名、描述、Quick Start、3 个示例、Language 列表",
+        "不超过 40 行",
+        "类型检查通过"
+      ],
+      "depends": ["US-001", "US-002"],
+      "priority": 3
+    }
+  ],
+  "taskSplit": [
+    {
+      "id": "TS-000",
+      "title": "项目骨架",
+      "userStory": "US-000",
+      "depends": [],
+      "parallel": false,
+      "branch": "feat/scaffold"
+    },
+    {
+      "id": "TS-001",
+      "title": "核心问候模块",
+      "userStory": "US-001",
+      "depends": ["TS-000"],
+      "parallel": true,
+      "branch": "feat/greet-module"
+    },
+    {
+      "id": "TS-002",
+      "title": "CLI 入口",
+      "userStory": "US-002",
+      "depends": ["TS-000"],
+      "parallel": true,
+      "branch": "feat/cli-entry"
+    },
+    {
+      "id": "TS-003",
+      "title": "README",
+      "userStory": "US-003",
+      "depends": ["TS-001", "TS-002"],
+      "parallel": false,
+      "branch": "feat/readme"
+    }
+  ]
+}

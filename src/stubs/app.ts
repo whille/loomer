@@ -172,6 +172,9 @@ export function createStubApp(): StubApp {
     },
 
     shutdown(): void {},
+    getTaskStatus(id: string): string | undefined {
+      return agents.get(id)?.status;
+    },
   };
 
   return stub;

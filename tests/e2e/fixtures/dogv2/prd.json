@@ -1,0 +1,138 @@
+{
+  "project": "dogv2 — Reading Tracker",
+  "branchName": "reading-tracker-v2",
+  "description": "个人阅读进度追踪工具。Express + EJS Web UI + CLI 入口，核心 CRUD（添加书籍、更新进度、标记完成/放弃、阅读笔记），统计卡片，响应式布局。SQLite 存储，dogfooding Loomer 流水线。",
+  "userStories": [
+    {
+      "id": "US-000",
+      "title": "项目骨架与文档",
+      "description": "作为开发者，我需要项目初始化和统一约定，确保后续 agent 写出一致的代码。",
+      "acceptanceCriteria": [
+        "创建 CLAUDE.md：技术栈（Node.js + Express + EJS + better-sqlite3 + TypeScript + commander + vitest）、目录结构约定、编码规范（snake_case DB 字段、类型定义在 src/types.ts）",
+        "创建 README.md：项目说明、启动命令",
+        "初始化 package.json（name: dogv2, type: module, scripts: build/dev/start/test）",
+        "创建 tsconfig.json（target ES2022, module NodeNext, outDir dist, 严格模式）",
+        "创建 src/types.ts：导出 Book/Note/BookStatus/Stats/Db 接口（所有字段 snake_case）",
+        "创建 src/db.js：SQLite 数据层实现 Db 接口所有方法",
+        "npm run build 通过且 node dist/cli.js serve --port 3000 可启动（首页返回 200）",
+        "vitest 测试覆盖 Db 接口 CRUD（:memory: DB）"
+      ],
+      "depends": [],
+      "priority": 1,
+      "passes": false,
+      "notes": "数据层+项目约定是所有后续功能的基础"
+    },
+    {
+      "id": "US-001",
+      "title": "Express 路由 + 全部页面",
+      "description": "作为用户，我通过 Web UI 完成所有阅读追踪操作。",
+      "acceptanceCriteria": [
+        "src/app.ts 导出 createApp(db: Db): Express.Application",
+        "路由实现：GET /, GET /books/add, POST /books, GET /books/:id, POST /books/:id/progress, POST /books/:id/finish, POST /books/:id/drop, POST /books/:id/notes",
+        "EJS 模板：index.ejs, add-book.ejs（values 对象传递）, book-detail.ejs, 404.ejs",
+        "静态文件服务（style.css）",
+        "404 处理中间件",
+        "首页：统计卡片（总书数/月完成/平均评分）+ 书籍表格",
+        "添加表单：验证必填字段，错误时回显输入值，成功后重定向到详情页",
+        "详情页：进度条、状态徽章、评分、笔记列表（按页码排序）、操作按钮",
+        "npm run build 通过且 node dist/cli.js serve 可启动，所有路由返回正确状态码",
+        "类型检查通过"
+      ],
+      "depends": ["US-000"],
+      "priority": 2,
+      "passes": false,
+      "notes": "数据层+路由合并为一个大 US，减少共享文件冲突"
+    },
+    {
+      "id": "US-002",
+      "title": "CLI 入口",
+      "description": "作为高级用户，我通过命令行启动 Web 服务器。",
+      "acceptanceCriteria": [
+        "src/cli.ts 使用 commander 解析 CLI 参数",
+        "node dist/cli.js serve [--port 3000] 启动 Web 服务器",
+        "默认端口 3000，可通过 --port 指定",
+        "启动时输出访问地址",
+        "npm run build 通过且 node dist/cli.js serve 可启动",
+        "类型检查通过"
+      ],
+      "depends": ["US-000"],
+      "priority": 2,
+      "passes": false,
+      "notes": "仅依赖 types.ts 和 app.ts 的 createApp 接口"
+    },
+    {
+      "id": "US-003",
+      "title": "响应式布局 + CSS",
+      "description": "作为用户，我在手机和桌面端都能正常使用。",
+      "acceptanceCriteria": [
+        "纯手写 CSS（无框架），响应式布局",
+        "桌面端：表格布局",
+        "移动端：卡片式布局 + 统计卡片堆叠",
+        "触摸目标 ≥ 44px",
+        "进度条颜色：reading→蓝色，finished→绿色，dropped→红色",
+        "node dist/cli.js serve 启动后浏览器验证桌面端和移动端布局",
+        "类型检查通过"
+      ],
+      "depends": ["US-000"],
+      "priority": 2,
+      "passes": false,
+      "notes": "仅依赖模板 HTML 结构（TS-000 提供模板骨架）"
+    },
+    {
+      "id": "US-004",
+      "title": "文档更新",
+      "description": "作为开发者，我需要更新项目文档反映所有变更。",
+      "acceptanceCriteria": [
+        "更新 CLAUDE.md 反映新增/变更的模块、接口、数据模型",
+        "更新 README.md 反映实际启动命令和功能",
+        "类型检查通过"
+      ],
+      "depends": ["US-001", "US-002", "US-003"],
+      "priority": 3,
+      "passes": false,
+      "notes": "必须最后执行，汇总所有变更"
+    }
+  ],
+  "taskSplit": [
+    {
+      "id": "TS-000",
+      "title": "项目骨架与文档",
+      "userStory": "US-000",
+      "depends": [],
+      "parallel": false,
+      "branch": "feat/project-scaffold"
+    },
+    {
+      "id": "TS-001",
+      "title": "Express 路由 + 全部页面",
+      "userStory": "US-001",
+      "depends": ["TS-000"],
+      "parallel": true,
+      "branch": "feat/express-pages"
+    },
+    {
+      "id": "TS-002",
+      "title": "CLI 入口",
+      "userStory": "US-002",
+      "depends": ["TS-000"],
+      "parallel": true,
+      "branch": "feat/cli-entry"
+    },
+    {
+      "id": "TS-003",
+      "title": "响应式布局 + CSS",
+      "userStory": "US-003",
+      "depends": ["TS-000"],
+      "parallel": true,
+      "branch": "feat/responsive-css"
+    },
+    {
+      "id": "TS-004",
+      "title": "文档更新",
+      "userStory": "US-004",
+      "depends": ["TS-001", "TS-002", "TS-003"],
+      "parallel": false,
+      "branch": "feat/doc-update"
+    }
+  ]
+}
