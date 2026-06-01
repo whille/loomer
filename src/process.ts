@@ -82,6 +82,8 @@ export class ProcessManager {
       "stream-json",
       "--verbose",
       "--include-partial-messages",
+      "--allowedTools",
+      "Bash,Read,Write,Edit,MultiEdit,Glob,Grep,LS",
       "--disallowed-tools",
       "AskUserQuestion",
       ...this.config.claudeArgs,

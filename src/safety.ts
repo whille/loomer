@@ -184,6 +184,7 @@ export class SafetyChecks {
         execFileSync("git", ["merge", "--abort"], {
           cwd: worktreePath,
           encoding: "utf-8",
+          stdio: ["pipe", "pipe", "pipe"],
         });
       } catch {
         // "Already up to date" 时无 MERGE_HEAD 可 abort，属正常情况
@@ -195,6 +196,7 @@ export class SafetyChecks {
         execFileSync("git", ["merge", "--abort"], {
           cwd: worktreePath,
           encoding: "utf-8",
+          stdio: ["pipe", "pipe", "pipe"],
         });
       } catch {
         // 回滚失败，尽力清理
