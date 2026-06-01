@@ -203,10 +203,15 @@ export function createProgram(
       if (opts.clean) {
         // Kill web server on configured port
         try {
-          const { execSync } = await import("node:child_process");
+          const { execFileSync } = await import("node:child_process");
           const port = opts.port ?? config.defaultPort;
-          execSync(`lsof -ti:${port} | xargs kill -9 2>/dev/null || true`, { stdio: "ignore" });
-        } catch { /* ignore */ }
+          const pids = execFileSync("lsof", ["-ti:" + port], { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
+          if (pids) {
+            for (const pid of pids.split("\n").filter(Boolean)) {
+              try { process.kill(Number(pid), "SIGKILL"); } catch { /* ignore */ }
+            }
+          }
+        } catch { /* no process on port */ }
 
         // Abort in-progress merges, prune worktrees, delete agent branches
         try {
