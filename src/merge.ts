@@ -161,6 +161,10 @@ export function deepMerge(
   return result;
 }
 
+function isLockFile(filepath: string): boolean {
+  return /(package-lock\.json|bun\.lockb|yarn\.lock|pnpm-lock\.yaml)$/.test(filepath);
+}
+
 /**
  * 自动解决冲突文件
  * @returns 解决后的内容，或 null 表示无法自动解决
@@ -173,6 +177,10 @@ export function autoResolveConflictFile(
   try {
     if (isPackageJson(filepath)) {
       return mergePackageJson(ours, theirs);
+    }
+    // lock 文件 → 直接取 theirs（重新生成比 merge 安全）
+    if (/(package-lock\.json|bun\.lockb|yarn\.lock|pnpm-lock\.yaml)$/.test(filepath)) {
+      return theirs;
     }
     if (isTsImportFile(filepath)) {
       return mergeTsImports(ours, theirs);
