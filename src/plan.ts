@@ -108,6 +108,13 @@ export function fromPrdJson(prdPath: string, maxConcurrent?: number): PlanSpec {
           promptParts.push(`- ${c}`);
         }
       }
+      const hints = (story?.hints as unknown as string[]) ?? [];
+      if (hints.length > 0) {
+        promptParts.push("\n\nHints:");
+        for (const h of hints) {
+          promptParts.push(`- ${h}`);
+        }
+      }
       promptParts.push("\n\nImportant: Do NOT ask clarifying questions. Implement based on the criteria above. Commit all changes.");
       return {
         id: ts.id as string,
