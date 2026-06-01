@@ -58,13 +58,12 @@ describe("mergeTsImports", () => {
     expect(result.indexOf("import { foo }")).toBeLessThan(result.indexOf("import { bar }"));
   });
 
-  it("export 区 ours 前 theirs 后", () => {
+  it("body 区 ours 优先（同文件冲突保留主分支）", () => {
     const ours = `export const a = 1;`;
     const theirs = `export const b = 2;`;
     const result = mergeTsImports(ours, theirs);
     expect(result).toContain("export const a = 1;");
-    expect(result).toContain("export const b = 2;");
-    expect(result.indexOf("export const a")).toBeLessThan(result.indexOf("export const b"));
+    expect(result).not.toContain("export const b = 2;");
   });
 
   it("去重相同 import", () => {
@@ -75,9 +74,9 @@ describe("mergeTsImports", () => {
     expect(result.match(/import \{ foo \}/g)?.length).toBe(1);
   });
 
-  it("空 ours 时只返回 theirs", () => {
+  it("空 ours 时 body 为空，theirs body 丢弃", () => {
     const result = mergeTsImports("", "export const b = 2;");
-    expect(result.trim()).toBe("export const b = 2;");
+    expect(result).not.toContain("export const b");
   });
 });
 
@@ -117,12 +116,12 @@ describe("autoResolveConflictFile", () => {
     expect(parsed.dependencies).toEqual({ a: "^1", b: "^2" });
   });
 
-  it("src/*.ts 文件使用拼接合并", () => {
+  it("src/*.ts 文件 ours 优先（同文件冲突保留主分支）", () => {
     const ours = "export const a = 1;";
     const theirs = "export const b = 2;";
     const result = autoResolveConflictFile("src/app.ts", ours, theirs);
     expect(result).toContain("export const a = 1;");
-    expect(result).toContain("export const b = 2;");
+    expect(result).not.toContain("export const b = 2;");
   });
 
   it("config 文件使用 deep merge", () => {

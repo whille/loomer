@@ -316,6 +316,36 @@ export class LoomerApp {
         }).trim();
         if (output) inMerge = true;
       } catch { /* 不在 merge 中 */ }
+
+      // "Already up to date" 但 agent 分支可能有 master 缺失的新文件
+      //（之前手动解决冲突时可能漏掉）
+      if (alreadyMerged) {
+        try {
+          const diffOutput = execFileSync("git", ["diff", "--name-only", "--diff-filter=A", `${baseBranch}...${name}`], {
+            cwd: this.repoPath, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"],
+          }).trim();
+          if (diffOutput) {
+            // agent 分支有 master 缺失的文件，checkout 过来
+            const files = diffOutput.split("\n").filter(Boolean);
+            for (const f of files) {
+              try {
+                execFileSync("git", ["checkout", name, "--", f], {
+                  cwd: this.repoPath, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"],
+                });
+              } catch { /* 忽略单个文件失败 */ }
+            }
+            // commit 新增文件
+            try {
+              execFileSync("git", ["add", "-A"], { cwd: this.repoPath, encoding: "utf-8" });
+              execFileSync("git", ["commit", "-m", `fix: cherry-pick missing files from ${name}`], {
+                cwd: this.repoPath, encoding: "utf-8",
+              });
+            } catch {
+              // 没有新变更则忽略
+            }
+          }
+        } catch { /* diff 失败忽略 */ }
+      }
     }
 
     // 3. 检查冲突文件是否都已解决

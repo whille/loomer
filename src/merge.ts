@@ -71,12 +71,12 @@ export function mergePackageJson(
 /**
  * 合并两个 TS/JS import/export 文件
  * import 区：去重并集（规范化后比较）
- * body 区：ours body + theirs body 拼接
+ * body 区：ours 优先（同文件双方都改 → 保留主分支版本，避免重复函数/变量）
  */
 export function mergeTsImports(
   ours: ConflictContent,
   theirs: ConflictContent,
-): ConflictContent {
+): ConflictContent | null {
   const oursLines = ours.split("\n");
   const theirsLines = theirs.split("\n");
 
@@ -84,7 +84,6 @@ export function mergeTsImports(
   const oursImports: string[] = [];
   const oursBody: string[] = [];
   const theirsImports: string[] = [];
-  const theirsBody: string[] = [];
 
   let pastImports = false;
   for (const line of oursLines) {
@@ -102,7 +101,7 @@ export function mergeTsImports(
       theirsImports.push(line);
     } else {
       pastImports = true;
-      theirsBody.push(line);
+      // theirs body 丢弃 — 同文件冲突 ours 优先
     }
   }
 
@@ -117,13 +116,11 @@ export function mergeTsImports(
     }
   }
 
-  // 拼接：import 区 + 空行 + ours body + 空行 + theirs body
+  // 拼接：import 区 + 空行 + ours body
   const parts: string[] = [];
   if (mergedImports.length > 0) parts.push(mergedImports.join("\n"));
-  if (oursBody.filter((l) => l.trim()).length > 0)
-    parts.push(oursBody.join("\n").trim());
-  if (theirsBody.filter((l) => l.trim()).length > 0)
-    parts.push(theirsBody.join("\n").trim());
+  const bodyTrimmed = oursBody.join("\n").trim();
+  if (bodyTrimmed.length > 0) parts.push(bodyTrimmed);
 
   return parts.join("\n\n") + "\n";
 }
