@@ -191,15 +191,15 @@ export function createProgram(
   plan
     .command("run")
     .requiredOption("--prd <path>", "Path to PRD JSON file")
+    .option("--repo <path>", "Path to git repository (default: cwd)")
     .option("--port <number>", "Web server port", parseInt)
-    .action(async (opts: { prd: string; port?: number }) => {
+    .action(async (opts: { prd: string; repo?: string; port?: number }) => {
       const config = loadConfig();
       const prdPath = path.resolve(opts.prd);
+      const repoPath = opts.repo ? path.resolve(opts.repo) : process.cwd();
 
       try {
         const { LoomerApp } = await import("./app.js");
-        // 从 prd.json 路径推导目标仓库目录（prd.json 的父目录）
-        const repoPath = path.dirname(path.dirname(prdPath));
         const loomerApp = LoomerApp.create(config, repoPath);
 
         const result = loomerApp.runPlan(undefined, prdPath, opts.port);

@@ -20,19 +20,32 @@ export class WorkspaceManager {
       baseBranch || this.detectBaseBranch() || "master";
     const worktreePath = `${this.repoPath}-${name}`;
 
-    // 清理残留 worktree
+    // 清理残留 worktree + 残留目录
+    try {
+      execFileSync("git", ["worktree", "remove", worktreePath, "--force"], {
+        cwd: this.repoPath, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"],
+      });
+    } catch {
+      // 不在 worktree list 中，忽略
+    }
     try {
       execFileSync("git", ["worktree", "prune"], {
-        cwd: this.repoPath,
-        encoding: "utf-8",
+        cwd: this.repoPath, encoding: "utf-8",
       });
     } catch {
       // 忽略
     }
+    if (fs.existsSync(worktreePath)) {
+      try {
+        fs.rmSync(worktreePath, { recursive: true, force: true });
+      } catch {
+        // 忽略
+      }
+    }
 
     const branchExists = this.exists(name);
     if (branchExists) {
-      execFileSync("git", ["worktree", "add", worktreePath, branch], {
+      execFileSync("git", ["worktree", "add", worktreePath, name], {
         cwd: this.repoPath,
         encoding: "utf-8",
       });
