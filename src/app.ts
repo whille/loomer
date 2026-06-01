@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import path from "node:path";
 import type http from "node:http";
 import type { LoomerConfig } from "./config.js";
 import { AgentNotFoundError, MergeError } from "./errors.js";
@@ -629,9 +630,10 @@ export class LoomerApp {
       return false;
     }
 
-    // 验证：tsc --noEmit + 可选 biome/vitest
+    // 验证：tsconfig.json 存在时 tsc required，否则 optional；biome/vitest 一律 optional
+    const hasTsconfig = fs.existsSync(path.join(mergeDir, "tsconfig.json"));
     const validators = [
-      { cmd: "npx", args: ["tsc", "--noEmit"], label: "tsc", required: true },
+      { cmd: "npx", args: ["tsc", "--noEmit"], label: "tsc", required: hasTsconfig },
       { cmd: "npx", args: ["biome", "check", "src/"], label: "biome", required: false },
       { cmd: "npx", args: ["vitest", "run"], label: "vitest", required: false },
     ];
