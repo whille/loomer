@@ -585,15 +585,38 @@ export class LoomerApp {
     for (const file of conflictFiles) {
       const filePath = `${mergeDir}/${file}`;
       try {
-        const content = fs.readFileSync(filePath, "utf-8");
-        const { ours, theirs } = this._extractConflictSides(content);
-
-        if (ours === null || theirs === null) return false;
-
-        const resolved = autoResolveConflictFile(file, ours, theirs);
-        if (resolved === null) return false;
-
-        fs.writeFileSync(filePath, resolved);
+        if (file === "package.json" || file.endsWith("/package.json")) {
+          // package.json：用 git show 获取完整 ours/theirs 版本（而非冲突块）
+          const baseBranch = this.config.baseBranch || "master";
+          let oursContent = "";
+          let theirsContent = "";
+          try {
+            oursContent = execFileSync("git", ["show", `HEAD:${file}`], {
+              cwd: mergeDir, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"],
+            });
+          } catch {
+            // HEAD 版本不存在（新文件）→ ours 为空
+          }
+          try {
+            theirsContent = execFileSync("git", ["show", `MERGE_HEAD:${file}`], {
+              cwd: mergeDir, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"],
+            });
+          } catch {
+            // MERGE_HEAD 版本不存在 → 无法解决
+            return false;
+          }
+          const resolved = autoResolveConflictFile(file, oursContent, theirsContent);
+          if (resolved === null) return false;
+          fs.writeFileSync(filePath, resolved);
+        } else {
+          // 非 package.json：用冲突标记提取 ours/theirs 块
+          const content = fs.readFileSync(filePath, "utf-8");
+          const { ours, theirs } = this._extractConflictSides(content);
+          if (ours === null || theirs === null) return false;
+          const resolved = autoResolveConflictFile(file, ours, theirs);
+          if (resolved === null) return false;
+          fs.writeFileSync(filePath, resolved);
+        }
       } catch {
         return false;
       }

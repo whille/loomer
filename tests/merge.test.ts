@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   mergePackageJson,
-  mergeTsSource,
+  mergeTsImports,
   deepMerge,
   autoResolveConflictFile,
   type ConflictContent,
@@ -49,11 +49,11 @@ describe("mergePackageJson", () => {
 
 // === TypeScript 源码拼接 ===
 
-describe("mergeTsSource", () => {
+describe("mergeTsImports", () => {
   it("import 区 ours 前 theirs 后", () => {
     const ours = `import { foo } from "./foo";\n\nexport const a = 1;`;
     const theirs = `import { bar } from "./bar";\n\nexport const b = 2;`;
-    const result = mergeTsSource(ours, theirs);
+    const result = mergeTsImports(ours, theirs);
     // ours import 在前
     expect(result.indexOf("import { foo }")).toBeLessThan(result.indexOf("import { bar }"));
   });
@@ -61,7 +61,7 @@ describe("mergeTsSource", () => {
   it("export 区 ours 前 theirs 后", () => {
     const ours = `export const a = 1;`;
     const theirs = `export const b = 2;`;
-    const result = mergeTsSource(ours, theirs);
+    const result = mergeTsImports(ours, theirs);
     expect(result).toContain("export const a = 1;");
     expect(result).toContain("export const b = 2;");
     expect(result.indexOf("export const a")).toBeLessThan(result.indexOf("export const b"));
@@ -70,13 +70,13 @@ describe("mergeTsSource", () => {
   it("去重相同 import", () => {
     const ours = `import { foo } from "./foo";`;
     const theirs = `import { foo } from "./foo";`;
-    const result = mergeTsSource(ours, theirs);
+    const result = mergeTsImports(ours, theirs);
     // 只出现一次
     expect(result.match(/import \{ foo \}/g)?.length).toBe(1);
   });
 
   it("空 ours 时只返回 theirs", () => {
-    const result = mergeTsSource("", "export const b = 2;");
+    const result = mergeTsImports("", "export const b = 2;");
     expect(result.trim()).toBe("export const b = 2;");
   });
 });

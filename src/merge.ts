@@ -1,71 +1,117 @@
 export type ConflictContent = string;
 
 /**
- * 合并两个 package.json 的依赖并集
- * 同 key 冲突时 ours 优先（保留主分支版本）
+ * package.json 中需要并集合并的 key（对象类型，同 key 取 ours 优先）
+ */
+const MERGE_KEYS = [
+  "dependencies",
+  "devDependencies",
+  "peerDependencies",
+  "optionalDependencies",
+  "scripts",
+  "bin",
+  "exports",
+  "overrides",
+  "resolutions",
+] as const;
+
+/**
+ * 合并两个 package.json
+ * - MERGE_KEYS 中的字段：并集合并，同 key 时 ours 优先
+ * - 其他字段：ours 优先（保留主分支版本）
  */
 export function mergePackageJson(
   ours: ConflictContent,
   theirs: ConflictContent,
-): ConflictContent {
-  const oursObj = JSON.parse(ours) as Record<string, unknown>;
-  const theirsObj = JSON.parse(theirs) as Record<string, unknown>;
+): ConflictContent | null {
+  let oursObj: Record<string, unknown>;
+  let theirsObj: Record<string, unknown>;
+  try {
+    oursObj = JSON.parse(ours) as Record<string, unknown>;
+    theirsObj = JSON.parse(theirs) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
 
   const result = { ...oursObj };
 
-  // 合并 dependencies 并集（ours 优先）
-  const oursDeps = (oursObj.dependencies ?? {}) as Record<string, string>;
-  const theirsDeps = (theirsObj.dependencies ?? {}) as Record<string, string>;
-  result.dependencies = { ...theirsDeps, ...oursDeps };
+  for (const key of MERGE_KEYS) {
+    const oursVal = oursObj[key] as Record<string, string> | undefined;
+    const theirsVal = theirsObj[key] as Record<string, string> | undefined;
 
-  // 合并 devDependencies 并集（ours 优先）
-  const oursDevDeps = (oursObj.devDependencies ?? {}) as Record<string, string>;
-  const theirsDevDeps = (theirsObj.devDependencies ?? {}) as Record<
-    string,
-    string
-  >;
-  result.devDependencies = { ...theirsDevDeps, ...oursDevDeps };
+    if (!oursVal && !theirsVal) continue;
 
-  return JSON.stringify(result, null, 2);
+    const merged: Record<string, string> = {};
+    // theirs 先写入
+    if (theirsVal) {
+      for (const [k, v] of Object.entries(theirsVal)) {
+        merged[k] = v;
+      }
+    }
+    // ours 覆盖（ours 优先）
+    if (oursVal) {
+      for (const [k, v] of Object.entries(oursVal)) {
+        merged[k] = v;
+      }
+    }
+
+    result[key] = merged;
+  }
+
+  // theirs 中有但 ours 中没有的顶层 key 也保留（如新增的 "type" 等）
+  for (const [key, val] of Object.entries(theirsObj)) {
+    if (!(key in result)) {
+      result[key] = val;
+    }
+  }
+
+  return JSON.stringify(result, null, 2) + "\n";
 }
 
 /**
- * 合并 TypeScript 源码：import 区 + export 区 + 类定义拼接
- * ours 在前，theirs 在后，重复 import 去重
+ * 合并两个 TS/JS import/export 文件
+ * import 区：去重并集（规范化后比较）
+ * body 区：ours body + theirs body 拼接
  */
-export function mergeTsSource(
+export function mergeTsImports(
   ours: ConflictContent,
   theirs: ConflictContent,
 ): ConflictContent {
-  if (!ours.trim()) return theirs;
-  if (!theirs.trim()) return ours;
-
   const oursLines = ours.split("\n");
   const theirsLines = theirs.split("\n");
 
-  // 分离 import 区和非 import 区
-  const oursImports = oursLines.filter((l) => l.trim().startsWith("import "));
-  const oursBody = oursLines.filter((l) => !l.trim().startsWith("import "));
+  // 分离 import 区和 body 区
+  const oursImports: string[] = [];
+  const oursBody: string[] = [];
+  const theirsImports: string[] = [];
+  const theirsBody: string[] = [];
 
-  const theirsImports = theirsLines.filter((l) =>
-    l.trim().startsWith("import "),
-  );
-  const theirsBody = theirsLines.filter((l) => !l.trim().startsWith("import "));
-
-  // 去重 import（ours 优先）
-  const seenImports = new Set<string>();
-  const mergedImports: string[] = [];
-
-  for (const imp of oursImports) {
-    const normalized = imp.trim();
-    if (!seenImports.has(normalized)) {
-      mergedImports.push(imp);
-      seenImports.add(normalized);
+  let pastImports = false;
+  for (const line of oursLines) {
+    if (!pastImports && (line.startsWith("import ") || line.trim() === "")) {
+      oursImports.push(line);
+    } else {
+      pastImports = true;
+      oursBody.push(line);
     }
   }
-  for (const imp of theirsImports) {
+
+  pastImports = false;
+  for (const line of theirsLines) {
+    if (!pastImports && (line.startsWith("import ") || line.trim() === "")) {
+      theirsImports.push(line);
+    } else {
+      pastImports = true;
+      theirsBody.push(line);
+    }
+  }
+
+  // 去重并集
+  const seenImports = new Set<string>();
+  const mergedImports: string[] = [];
+  for (const imp of [...oursImports, ...theirsImports]) {
     const normalized = imp.trim();
-    if (!seenImports.has(normalized)) {
+    if (normalized && !seenImports.has(normalized)) {
       mergedImports.push(imp);
       seenImports.add(normalized);
     }
@@ -79,65 +125,48 @@ export function mergeTsSource(
   if (theirsBody.filter((l) => l.trim()).length > 0)
     parts.push(theirsBody.join("\n").trim());
 
-  return parts.join("\n\n");
+  return parts.join("\n\n") + "\n";
 }
 
-/**
- * 深合并对象：ours 为基准，叠 theirs 新增 key
- * 同 key 冲突时 ours 优先
- */
-export function deepMerge(
-  ours: Record<string, unknown>,
-  theirs: Record<string, unknown>,
-): Record<string, unknown> {
-  const result: Record<string, unknown> = { ...ours };
-
-  for (const [key, value] of Object.entries(theirs)) {
-    if (!(key in result)) {
-      result[key] = value;
-    } else if (
-      typeof result[key] === "object" &&
-      result[key] !== null &&
-      !Array.isArray(result[key]) &&
-      typeof value === "object" &&
-      value !== null &&
-      !Array.isArray(value)
-    ) {
-      result[key] = deepMerge(
-        result[key] as Record<string, unknown>,
-        value as Record<string, unknown>,
-      );
-    }
-    // 同 key 且非嵌套对象 → ours 优先，不覆盖
-  }
-
-  return result;
-}
-
-/** 判断是否为 package.json 文件 */
+/** 判断文件路径是否为 package.json */
 function isPackageJson(filepath: string): boolean {
   return filepath === "package.json" || filepath.endsWith("/package.json");
 }
 
-/** 判断是否为 src/*.ts 源码文件 */
-function isTsSource(filepath: string): boolean {
-  return /\.(ts|tsx)$/.test(filepath) && /(?:^|\/)src\//.test(filepath);
+/** 判断文件路径是否为 TS/JS import 文件 */
+function isTsImportFile(filepath: string): boolean {
+  return /\.(ts|tsx|js|jsx|mjs|cjs)$/.test(filepath);
 }
 
-/** 判断是否为配置文件 */
-function isConfigFile(filepath: string): boolean {
-  const filename = filepath.split("/").pop() ?? "";
-  return (
-    filename.includes("config") ||
-    filename === "tsconfig.json" ||
-    filename.endsWith(".config.json") ||
-    filename.endsWith(".rc.json")
-  );
+/** 深度合并两个对象（ours 优先） */
+export function deepMerge(
+  ours: Record<string, unknown>,
+  theirs: Record<string, unknown>,
+): Record<string, unknown> {
+  const result = { ...theirs };
+  for (const [key, val] of Object.entries(ours)) {
+    if (
+      val &&
+      typeof val === "object" &&
+      !Array.isArray(val) &&
+      result[key] &&
+      typeof result[key] === "object" &&
+      !Array.isArray(result[key])
+    ) {
+      result[key] = deepMerge(
+        val as Record<string, unknown>,
+        result[key] as Record<string, unknown>,
+      );
+    } else {
+      result[key] = val;
+    }
+  }
+  return result;
 }
 
 /**
- * 按文件类型分派自动解决策略
- * 返回 null 表示无法自动解决
+ * 自动解决冲突文件
+ * @returns 解决后的内容，或 null 表示无法自动解决
  */
 export function autoResolveConflictFile(
   filepath: string,
@@ -148,16 +177,16 @@ export function autoResolveConflictFile(
     if (isPackageJson(filepath)) {
       return mergePackageJson(ours, theirs);
     }
-    if (isTsSource(filepath)) {
-      return mergeTsSource(ours, theirs);
+    if (isTsImportFile(filepath)) {
+      return mergeTsImports(ours, theirs);
     }
-    if (isConfigFile(filepath)) {
+    // 其他 JSON 配置文件 → deepMerge
+    if (filepath.endsWith(".json")) {
       const oursObj = JSON.parse(ours) as Record<string, unknown>;
       const theirsObj = JSON.parse(theirs) as Record<string, unknown>;
-      return JSON.stringify(deepMerge(oursObj, theirsObj), null, 2);
+      return JSON.stringify(deepMerge(oursObj, theirsObj), null, 2) + "\n";
     }
   } catch {
-    // 解析失败 → 无法自动解决
     return null;
   }
   return null;
