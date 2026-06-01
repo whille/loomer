@@ -76,14 +76,14 @@ export function fromPrdJson(prdPath: string, maxConcurrent?: number): PlanSpec {
       throw new PlanFormatError("Missing or invalid 'project' field in prd.json");
     }
 
-    if (!Array.isArray(prd.taskSplit)) {
-      throw new PlanFormatError("Missing or invalid 'taskSplit' field in prd.json");
+    const taskSplit = (prd.taskSplit ?? prd.tasks) as Array<Record<string, unknown>> | undefined;
+    if (!Array.isArray(taskSplit)) {
+      throw new PlanFormatError("Missing or invalid 'taskSplit' or 'tasks' field in prd.json");
     }
 
     const userStories =
       (prd.userStories as Array<Record<string, string>>) ?? [];
     const storyMap = new Map(userStories.map((us) => [us.id, us]));
-    const taskSplit = prd.taskSplit as Array<Record<string, unknown>>;
 
     for (const ts of taskSplit) {
       if (!ts || typeof ts !== "object" || Array.isArray(ts)) {
