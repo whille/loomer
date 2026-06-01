@@ -117,20 +117,6 @@ export class SafetyChecks {
 
     const base = baseBranch || "master";
 
-    // 检测是否为新项目（base 分支 commit 数 ≤ 3 视为新项目）
-    let isNewProject = false;
-    try {
-      const commitCount = execFileSync(
-        "git", ["rev-list", "--count", base],
-        { cwd: worktreePath, encoding: "utf-8" },
-      ).trim();
-      const count = Number.parseInt(commitCount, 10);
-      isNewProject = !Number.isNaN(count) && count > 0 && count <= 3;
-    } catch {
-      // git 命令失败时保守处理：视为非新项目，不降级风险信号
-      isNewProject = false;
-    }
-
     // 信号 1+3+4+6 共享 name-status 输出
     const diffNameStatus = execFileSync("git", ["diff", "--name-status", `${base}...HEAD`], {
       cwd: worktreePath,
@@ -140,16 +126,20 @@ export class SafetyChecks {
       ? diffNameStatus.split("\n").filter(Boolean)
       : [];
 
-    // 信号 1: file_count（新项目一律 LOW）
+    // 纯新增判断：所有变更都是 Added → 项目初始搭建，不触发 new_files/test 信号
+    const isAllNewFiles = statusLines.length > 0
+      && statusLines.every((l) => l.startsWith("A\t"));
+
+    // 信号 1: file_count（纯新增一律 LOW）
     const files = statusLines
       .map((l) => l.split("\t").pop() || "")
       .filter(Boolean);
     const fileCount = files.length;
-    const fileCountLevel = isNewProject
+    const fileCountLevel = isAllNewFiles
       ? RiskLevel.LOW
       : fileCount > rules.maxFiles ? RiskLevel.HIGH : RiskLevel.LOW;
 
-    // 信号 2: line_count（新项目一律 LOW）
+    // 信号 2: line_count（纯新增一律 LOW）
     const shortstat = execFileSync("git", ["diff", "--shortstat", `${base}...HEAD`], {
       cwd: worktreePath,
       encoding: "utf-8",
@@ -159,20 +149,20 @@ export class SafetyChecks {
     const insertions = insMatch ? Number.parseInt(insMatch[1], 10) : 0;
     const deletions = delMatch ? Number.parseInt(delMatch[1], 10) : 0;
     const totalLines = insertions + deletions;
-    const lineCountLevel = isNewProject
+    const lineCountLevel = isAllNewFiles
       ? RiskLevel.LOW
       : totalLines > rules.maxLines ? RiskLevel.HIGH : RiskLevel.LOW;
 
-    // 信号 3: new_files（新项目一律 LOW）
+    // 信号 3: new_files（纯新增一律 LOW）
     const hasNewFiles = statusLines.some((l) => l.startsWith("A\t"));
-    const newFilesLevel = hasNewFiles && !isNewProject ? RiskLevel.HIGH : RiskLevel.LOW;
+    const newFilesLevel = hasNewFiles && !isAllNewFiles ? RiskLevel.HIGH : RiskLevel.LOW;
 
-    // 信号 4: public_modules（新项目一律 LOW）
+    // 信号 4: public_modules（纯新增一律 LOW）
     const hasPublicModules = files.some((filepath) => {
       const parts = filepath.split("/");
       return parts.slice(0, -1).some((p) => ["lib", "core", "src"].includes(p));
     });
-    const publicModulesLevel = hasPublicModules && !isNewProject
+    const publicModulesLevel = hasPublicModules && !isAllNewFiles
       ? RiskLevel.HIGH
       : RiskLevel.LOW;
 
@@ -212,7 +202,7 @@ export class SafetyChecks {
     }
     const conflictLevel = hasConflict ? RiskLevel.HIGH : RiskLevel.LOW;
 
-    // 信号 6: test（TypeScript 适配：*.test.ts, *.spec.ts, tests/, __tests__/）
+    // 信号 6: test（纯新增一律 LOW；修改已有文件但无测试变更仍为 HIGH）
     const hasTestFiles = files.some((filepath) => {
       const parts = filepath.split("/");
       const filename = parts[parts.length - 1];
@@ -222,7 +212,7 @@ export class SafetyChecks {
       return inTestDir || isTestFile;
     });
     const testLevel =
-      files.length > 0 && !hasTestFiles ? RiskLevel.HIGH : RiskLevel.LOW;
+      files.length > 0 && !hasTestFiles && !isAllNewFiles ? RiskLevel.HIGH : RiskLevel.LOW;
 
     // 汇总
     const signals = [

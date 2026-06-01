@@ -34,12 +34,6 @@ function createTestRepo(): string {
   fs.writeFileSync(path.join(tmpDir, "README.md"), "# test")
   execSync("git add -A", { cwd: tmpDir })
   execSync("git commit -m 'initial'", { cwd: tmpDir, encoding: "utf-8" })
-  // 多加几个 commit 确保 isNewProject=false（commit count > 3）
-  for (let i = 0; i < 4; i++) {
-    fs.writeFileSync(path.join(tmpDir, `setup${i}.txt`), `setup ${i}`)
-    execSync("git add -A", { cwd: tmpDir })
-    execSync(`git commit -m 'setup ${i}'`, { cwd: tmpDir, encoding: "utf-8" })
-  }
   return tmpDir
 }
 
@@ -307,10 +301,11 @@ describe("SafetyChecks", () => {
       it("文件数 > maxFiles 为 HIGH", () => {
         const branch = "feat/file-count-high"
         createFeatureBranch(repo, branch)
+        fs.writeFileSync(path.join(repo, "README.md"), "# modified")
         for (let i = 0; i < 6; i++) {
           fs.writeFileSync(path.join(repo, `file${i}.ts`), `export const a${i} = ${i}`)
         }
-        execSync("git add -A && git commit -m 'add 6 files'", {
+        execSync("git add -A && git commit -m 'modify and add 6 files'", {
           cwd: repo,
           encoding: "utf-8",
         })
@@ -352,11 +347,12 @@ describe("SafetyChecks", () => {
 
       it("行数 > maxLines 为 HIGH", () => {
         createFeatureBranch(repo, "feat/line-high")
+        fs.writeFileSync(path.join(repo, "README.md"), "# modified")
         fs.writeFileSync(
           path.join(repo, "big.ts"),
           Array(250).fill("export const x = 1;").join("\n"),
         )
-        execSync("git add -A && git commit -m 'big change'", {
+        execSync("git add -A && git commit -m 'modify and big change'", {
           cwd: repo,
           encoding: "utf-8",
         })
@@ -395,8 +391,9 @@ describe("SafetyChecks", () => {
 
       it("有新文件为 HIGH", () => {
         createFeatureBranch(repo, "feat/has-new")
+        fs.writeFileSync(path.join(repo, "README.md"), "# modified")
         fs.writeFileSync(path.join(repo, "brand-new.ts"), "export const x = 1")
-        execSync("git add -A && git commit -m 'add new file'", {
+        execSync("git add -A && git commit -m 'modify and add new file'", {
           cwd: repo,
           encoding: "utf-8",
         })
@@ -416,9 +413,10 @@ describe("SafetyChecks", () => {
     describe("信号: public_modules", () => {
       it("修改 src/ 下文件为 HIGH", () => {
         createFeatureBranch(repo, "feat/pub-mod")
+        fs.writeFileSync(path.join(repo, "README.md"), "# modified")
         fs.mkdirSync(path.join(repo, "src"), { recursive: true })
         fs.writeFileSync(path.join(repo, "src", "utils.ts"), "export const x = 1")
-        execSync("git add -A && git commit -m 'modify src'", {
+        execSync("git add -A && git commit -m 'modify and add src'", {
           cwd: repo,
           encoding: "utf-8",
         })
@@ -436,9 +434,10 @@ describe("SafetyChecks", () => {
 
       it("修改 lib/ 下文件为 HIGH", () => {
         createFeatureBranch(repo, "feat/lib-mod")
+        fs.writeFileSync(path.join(repo, "README.md"), "# modified")
         fs.mkdirSync(path.join(repo, "lib"), { recursive: true })
         fs.writeFileSync(path.join(repo, "lib", "helper.ts"), "export const y = 1")
-        execSync("git add -A && git commit -m 'modify lib'", {
+        execSync("git add -A && git commit -m 'modify and add lib'", {
           cwd: repo,
           encoding: "utf-8",
         })
@@ -479,6 +478,7 @@ describe("SafetyChecks", () => {
 
       it("vendor/core/ 不匹配（精确路径段）", () => {
         createFeatureBranch(repo, "feat/vendor-core")
+        fs.writeFileSync(path.join(repo, "README.md"), "# modified")
         fs.mkdirSync(path.join(repo, "vendor", "core"), { recursive: true })
         fs.writeFileSync(
           path.join(repo, "vendor", "core", "thing.ts"),
@@ -663,8 +663,10 @@ describe("SafetyChecks", () => {
 
       it("有改动但无测试文件为 HIGH", () => {
         createFeatureBranch(repo, "feat/no-test")
+        // 修改已有文件 + 新增文件，非纯新增
+        fs.writeFileSync(path.join(repo, "README.md"), "# modified")
         fs.writeFileSync(path.join(repo, "utils.ts"), "export const x = 1")
-        execSync("git add -A && git commit -m 'add code only'", {
+        execSync("git add -A && git commit -m 'modify and add code'", {
           cwd: repo,
           encoding: "utf-8",
         })
@@ -711,15 +713,15 @@ describe("SafetyChecks", () => {
 
       it("任一 HIGH 时整体为 HIGH", () => {
         createFeatureBranch(repo, "feat/one-high")
-        // file_count 会在 new_files HIGH 的同时触发（新文件也算 file_count）
-        // 只需确保超过 maxFiles
+        // 修改已有文件 + 新增多个文件，使 file_count 超过 maxFiles
+        fs.writeFileSync(path.join(repo, "README.md"), "# modified")
         for (let i = 0; i < 6; i++) {
           fs.writeFileSync(
-            path.join(repo, `file${i}.test.ts`),
-            `test('${i}', () => {});`,
+            path.join(repo, `file${i}.ts`),
+            `export const a${i} = ${i}`,
           )
         }
-        execSync("git add -A && git commit -m 'many test files'", {
+        execSync("git add -A && git commit -m 'modify and add many files'", {
           cwd: repo,
           encoding: "utf-8",
         })
@@ -731,7 +733,7 @@ describe("SafetyChecks", () => {
           DEFAULT_RULES,
           "master",
         )
-        // file_count 超过 5 → HIGH → 整体 HIGH
+        // file_count 超过 20 且非纯新增 → HIGH → 整体 HIGH
         expect(result.level).toBe(RiskLevel.HIGH)
       })
     })
@@ -753,6 +755,66 @@ describe("SafetyChecks", () => {
         expect(fileCount.level).toBe(RiskLevel.LOW)
         const test = result.signals.find((s) => s.name === "test")!
         expect(test.level).toBe(RiskLevel.LOW)
+      })
+    })
+
+    describe("纯新增（isAllNewFiles）", () => {
+      it("所有变更都是新增文件时 test/new_files/file_count/line_count/public_modules 均为 LOW", () => {
+        createFeatureBranch(repo, "feat/all-new")
+        // 只添加新文件，不修改已有文件
+        fs.writeFileSync(path.join(repo, "utils.ts"), "export const x = 1")
+        fs.mkdirSync(path.join(repo, "src"), { recursive: true })
+        fs.writeFileSync(path.join(repo, "src", "main.ts"), "export const y = 2")
+        fs.mkdirSync(path.join(repo, "lib"), { recursive: true })
+        fs.writeFileSync(path.join(repo, "lib", "core.ts"), "export const z = 3")
+        for (let i = 0; i < 6; i++) {
+          fs.writeFileSync(path.join(repo, `file${i}.ts`), `export const a${i} = ${i}`)
+        }
+        execSync("git add -A && git commit -m 'add many new files'", {
+          cwd: repo,
+          encoding: "utf-8",
+        })
+        const safety = new SafetyChecks(repo)
+        const result = safety.assessRisk(
+          "test",
+          repo,
+          "auto",
+          DEFAULT_RULES,
+          "master",
+        )
+        const test = result.signals.find((s) => s.name === "test")!
+        expect(test.level).toBe(RiskLevel.LOW)
+        const newFiles = result.signals.find((s) => s.name === "new_files")!
+        expect(newFiles.level).toBe(RiskLevel.LOW)
+        const fileCount = result.signals.find((s) => s.name === "file_count")!
+        expect(fileCount.level).toBe(RiskLevel.LOW)
+        const lineCount = result.signals.find((s) => s.name === "line_count")!
+        expect(lineCount.level).toBe(RiskLevel.LOW)
+        const publicModules = result.signals.find((s) => s.name === "public_modules")!
+        expect(publicModules.level).toBe(RiskLevel.LOW)
+      })
+
+      it("混合新增+修改时 test 信号仍为 HIGH（无测试文件）", () => {
+        createFeatureBranch(repo, "feat/mixed-changes")
+        // 修改已有文件 + 新增文件 → 非 isAllNewFiles
+        fs.writeFileSync(path.join(repo, "README.md"), "# modified")
+        fs.writeFileSync(path.join(repo, "new.ts"), "export const x = 1")
+        execSync("git add -A && git commit -m 'modify and add'", {
+          cwd: repo,
+          encoding: "utf-8",
+        })
+        const safety = new SafetyChecks(repo)
+        const result = safety.assessRisk(
+          "test",
+          repo,
+          "auto",
+          DEFAULT_RULES,
+          "master",
+        )
+        const test = result.signals.find((s) => s.name === "test")!
+        expect(test.level).toBe(RiskLevel.HIGH)
+        const newFiles = result.signals.find((s) => s.name === "new_files")!
+        expect(newFiles.level).toBe(RiskLevel.HIGH)
       })
     })
   })
