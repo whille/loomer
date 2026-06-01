@@ -80,6 +80,7 @@ export class ProcessManager {
       prompt,
       "--output-format",
       "stream-json",
+      "--verbose",
       "--allowedTools",
       "Bash,Read,Write,Edit,MultiEdit,Glob,Grep,LS",
       "--disallowed-tools",
