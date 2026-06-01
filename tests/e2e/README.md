@@ -135,22 +135,34 @@ TS-001/002/003 启动时需要 rebase 到 TS-000 完成后的最新 master，获
 
 ## 执行方式
 
+所有开发在 `/tmp/` 下进行，生成代码不入 loomer 仓库。
+
 ```bash
 # 测试 #1: mini-greet（~5 min）
 mkdir -p /tmp/mini-greet && cd /tmp/mini-greet
 git init
-# 手动创建一个初始 commit（Loomer 需要干净 git 仓库）
 echo "# mini-greet" > README.md && git add . && git commit -m "init"
+
+# PRD 文件从 dogv2 项目复制（或从本文件末尾的附录手动创建）
+cp /Users/wangzhiguo/github.com/dogv2/tasks/prd.json /tmp/mini-greet-prd.json
+
 # 用 Loomer 运行
 cd /Users/wangzhiguo/github.com/loomer
-bun run src/cli.ts plan run --prd /Users/wangzhiguo/github.com/loomer/tests/e2e/fixtures/mini-greet/prd.json
+npm run build
+cd /tmp/mini-greet
+node /Users/wangzhiguo/github.com/loomer/dist/cli.js plan run \
+  --prd /tmp/mini-greet-prd.json --repo /tmp/mini-greet --port 5001
 
 # 测试 #2: dogv2（~20 min）
 mkdir -p /tmp/dogv2 && cd /tmp/dogv2
 git init
 echo "# dogv2" > README.md && git add . && git commit -m "init"
-cd /Users/wangzhiguo/github.com/loomer
-bun run src/cli.ts plan run --prd /Users/wangzhiguo/github.com/loomer/tests/e2e/fixtures/dogv2/prd.json
+
+cp /Users/wangzhiguo/github.com/dogv2/tasks/prd.json /tmp/dogv2-prd.json
+
+cd /tmp/dogv2
+node /Users/wangzhiguo/github.com/loomer/dist/cli.js plan run \
+  --prd /tmp/dogv2-prd.json --repo /tmp/dogv2 --port 5001
 ```
 
 ## 验证清单

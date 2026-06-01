@@ -3,4 +3,5 @@ dist/
 .worktrees/
 ~/.loomer/
 *.db
+tests/e2e/fixtures/
 tests/e2e/fixtures-TS-*/
